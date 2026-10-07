@@ -1,0 +1,16 @@
+# secrets
+.env
+
+# runtime data (crawled content, vectors, sqlite)
+data/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# editors
+.vscode/
+.idea/

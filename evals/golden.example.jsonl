@@ -1,0 +1,7 @@
+# Golden eval questions — one JSON per line.
+# Replace these with real questions your visitors actually ask.
+# Fields: question (required), expect_url (optional — substring of the page URL that SHOULD contain the answer).
+# Run with: python -m easylink eval --file evals/golden.example.jsonl --llm
+{"question": "What is this website about?", "expect_url": "example.com"}
+{"question": "How can I contact support?", "expect_url": ""}
+{"question": "What are your opening hours?", "expect_url": ""}
