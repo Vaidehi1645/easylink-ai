@@ -232,6 +232,32 @@ def cmd_eval(args) -> int:
     return 0
 
 
+def cmd_embed(args) -> int:
+    """Print this site's widget token + copy-paste snippet (Phase 2)."""
+    import os
+
+    from easylink.store import Database
+
+    db = Database()
+    site = db.get_site(args.site)
+    if not site:
+        print("No site found. Crawl one first: easylink crawl <url>")
+        return 1
+    token = db.get_or_create_token(site["id"])
+    port = os.environ.get("EASYLINK_PORT", "8000")
+    base = f"http://127.0.0.1:{port}"
+    print(f"Site:  {site['name']}  (id {site['id']})")
+    print(f"Token: {token}")
+    print()
+    print("Embed snippet (paste before </body> on your website):")
+    print(f'    <script src="{base}/widget.js" data-site="{token}"></script>')
+    print()
+    print(f"Local test page : {base}/test?token={token}")
+    print("Start the server: venv\\Scripts\\python.exe -m api")
+    print("(localhost only in Phase 2 — public HTTPS hosting arrives in Phase 5)")
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> int:
     _utf8()
@@ -268,6 +294,10 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--file", default=None, help="golden questions JSONL")
     e.add_argument("--llm", action="store_true", help="generate real answers (uses API credits)")
     e.set_defaults(func=cmd_eval)
+
+    em = sub.add_parser("embed", help="widget token + embed snippet (Phase 2)")
+    em.add_argument("--site", default="latest", help="site id or 'latest'")
+    em.set_defaults(func=cmd_embed)
 
     args = p.parse_args(argv)
     if not getattr(args, "command", None):

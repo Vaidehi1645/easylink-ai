@@ -10,6 +10,7 @@ Two stores:
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -62,6 +63,12 @@ CREATE TABLE IF NOT EXISTS eval_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_site ON chunks(site_id);
 CREATE INDEX IF NOT EXISTS idx_gaps_site ON gaps(site_id);
+CREATE TABLE IF NOT EXISTS usage (
+    site_id TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    count   INTEGER DEFAULT 0,
+    PRIMARY KEY (site_id, day)
+);
 """
 
 
@@ -72,84 +79,132 @@ def now_iso() -> str:
 class Database:
     def __init__(self, path: Path = DB_PATH):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(path))
+        # check_same_thread=False + lock: the API server uses this connection
+        # from multiple request threads (Phase 1 was single-threaded CLI).
+        self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(_SCHEMA)
-        self.conn.commit()
+        self.lock = threading.RLock()
+        with self.lock:
+            self.conn.executescript(_SCHEMA)
+            self.conn.execute("PRAGMA busy_timeout=5000")
+            # migration: widget tokens (Phase 2)
+            cols = [r[1] for r in self.conn.execute("PRAGMA table_info(sites)")]
+            if "token" not in cols:
+                self.conn.execute("ALTER TABLE sites ADD COLUMN token TEXT")
+            self.conn.commit()
+
+    def _rows(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+        with self.lock:
+            return self.conn.execute(sql, params).fetchall()
+
+    def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        with self.lock:
+            cur = self.conn.execute(sql, params)
+            self.conn.commit()
+            return cur
 
     # -- sites ------------------------------------------------------------
     def create_site(self, url: str, name: str = "") -> str:
         site_id = uuid.uuid4().hex[:12]
-        self.conn.execute(
+        self._exec(
             "INSERT INTO sites (id, name, url, created_at) VALUES (?,?,?,?)",
             (site_id, name or url, url, now_iso()),
         )
-        self.conn.commit()
         return site_id
 
     def update_site_counts(self, site_id: str, pages: int, chunks: int) -> None:
-        self.conn.execute(
+        self._exec(
             "UPDATE sites SET page_count=?, chunk_count=? WHERE id=?",
             (pages, chunks, site_id),
         )
-        self.conn.commit()
 
     def list_sites(self) -> list[sqlite3.Row]:
-        return self.conn.execute(
-            "SELECT * FROM sites ORDER BY created_at DESC"
-        ).fetchall()
+        return self._rows("SELECT * FROM sites ORDER BY created_at DESC")
 
     def get_site(self, site_id: str | None = None) -> sqlite3.Row | None:
         """site_id, 'latest', or None -> most recent site."""
         if not site_id or site_id == "latest":
-            return self.conn.execute(
-                "SELECT * FROM sites ORDER BY created_at DESC LIMIT 1"
+            rows = self._rows("SELECT * FROM sites ORDER BY created_at DESC LIMIT 1")
+        else:
+            rows = self._rows("SELECT * FROM sites WHERE id=? OR name=?", (site_id, site_id))
+        return rows[0] if rows else None
+
+    # -- widget tokens (Phase 2) ------------------------------------------
+    def get_or_create_token(self, site_id: str) -> str:
+        row = self._rows("SELECT token FROM sites WHERE id=?", (site_id,))[0]
+        if row["token"]:
+            return row["token"]
+        import secrets
+
+        token = secrets.token_hex(24)
+        self._exec("UPDATE sites SET token=? WHERE id=?", (token, site_id))
+        return token
+
+    def resolve_token(self, token: str) -> sqlite3.Row | None:
+        if not token or len(token) < 16:
+            return None
+        rows = self._rows("SELECT * FROM sites WHERE token=?", (token,))
+        return rows[0] if rows else None
+
+    # -- daily usage quota -------------------------------------------------
+    def usage_today(self, site_id: str) -> int:
+        rows = self._rows(
+            "SELECT count FROM usage WHERE site_id=? AND day=?", (site_id, time.strftime("%Y-%m-%d"))
+        )
+        return int(rows[0]["count"]) if rows else 0
+
+    def bump_usage(self, site_id: str) -> int:
+        day = time.strftime("%Y-%m-%d")
+        with self.lock:
+            self.conn.execute(
+                "INSERT INTO usage (site_id, day, count) VALUES (?,?,1) "
+                "ON CONFLICT(site_id, day) DO UPDATE SET count=count+1",
+                (site_id, day),
+            )
+            self.conn.commit()
+            rows = self.conn.execute(
+                "SELECT count FROM usage WHERE site_id=? AND day=?", (site_id, day)
             ).fetchone()
-        return self.conn.execute(
-            "SELECT * FROM sites WHERE id=? OR name=?", (site_id, site_id)
-        ).fetchone()
+        return int(rows["count"])
 
     # -- pages / chunks ---------------------------------------------------
     def add_page(self, site_id: str, url: str, title: str, content_hash: str, chars: int) -> None:
-        self.conn.execute(
+        self._exec(
             "INSERT INTO pages (site_id, url, title, content_hash, chars, fetched_at) "
             "VALUES (?,?,?,?,?,?)",
             (site_id, url, title, content_hash, chars, now_iso()),
         )
-        self.conn.commit()
 
     def add_chunks(self, rows: list[tuple]) -> None:
-        self.conn.executemany(
-            "INSERT OR IGNORE INTO chunks (id, site_id, page_url, title, idx, text) "
-            "VALUES (?,?,?,?,?,?)",
-            rows,
-        )
-        self.conn.commit()
+        with self.lock:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO chunks (id, site_id, page_url, title, idx, text) "
+                "VALUES (?,?,?,?,?,?)",
+                rows,
+            )
+            self.conn.commit()
 
     # -- gaps -------------------------------------------------------------
     def add_gap(self, site_id: str, question: str, source: str) -> None:
-        self.conn.execute(
+        self._exec(
             "INSERT INTO gaps (site_id, question, source, created_at) VALUES (?,?,?,?)",
             (site_id, question, source, now_iso()),
         )
-        self.conn.commit()
 
     def list_gaps(self, site_id: str | None = None, limit: int = 50) -> list[sqlite3.Row]:
         if site_id:
-            q = "SELECT * FROM gaps WHERE site_id=? ORDER BY id DESC LIMIT ?"
-            return self.conn.execute(q, (site_id, limit)).fetchall()
-        return self.conn.execute(
-            "SELECT * FROM gaps ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+            return self._rows(
+                "SELECT * FROM gaps WHERE site_id=? ORDER BY id DESC LIMIT ?", (site_id, limit)
+            )
+        return self._rows("SELECT * FROM gaps ORDER BY id DESC LIMIT ?", (limit,))
 
     # -- evals ------------------------------------------------------------
     def add_eval_run(self, site_id: str, total: int, ok: int, answered: int, abstained: int) -> None:
-        self.conn.execute(
+        self._exec(
             "INSERT INTO eval_runs (site_id, ran_at, total, retrieved_ok, answered, abstained) "
             "VALUES (?,?,?,?,?,?)",
             (site_id, now_iso(), total, ok, answered, abstained),
         )
-        self.conn.commit()
 
 
 # --------------------------------------------------------------------------- #
@@ -244,18 +299,19 @@ class NumpyVectorStore(VectorStore):
 
     def __init__(self, db: Database):
         self.db = db
-        self.db.conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS vectors (
-                id      TEXT PRIMARY KEY,
-                site_id TEXT NOT NULL,
-                dim     INTEGER NOT NULL,
-                vec     BLOB NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_vectors_site ON vectors(site_id);
-            """
-        )
-        self.db.conn.commit()
+        with db.lock:
+            db.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS vectors (
+                    id      TEXT PRIMARY KEY,
+                    site_id TEXT NOT NULL,
+                    dim     INTEGER NOT NULL,
+                    vec     BLOB NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_vectors_site ON vectors(site_id);
+                """
+            )
+            db.conn.commit()
 
     def add(self, site_id, ids, embeddings, documents, metadatas) -> None:
         rows = []
@@ -264,17 +320,18 @@ class NumpyVectorStore(VectorStore):
             norm = np.linalg.norm(vec) or 1.0
             vec = vec / norm
             rows.append((_id, site_id, vec.size, vec.tobytes()))
-        self.db.conn.executemany(
-            "INSERT OR IGNORE INTO vectors (id, site_id, dim, vec) VALUES (?,?,?,?)", rows
-        )
-        self.db.conn.commit()
+        with self.db.lock:
+            self.db.conn.executemany(
+                "INSERT OR IGNORE INTO vectors (id, site_id, dim, vec) VALUES (?,?,?,?)", rows
+            )
+            self.db.conn.commit()
 
     def query(self, site_id: str, embedding: list[float], k: int) -> list[dict]:
-        rows = self.db.conn.execute(
+        rows = self.db._rows(
             "SELECT v.id, v.vec, c.page_url, c.title, c.text FROM vectors v "
             "JOIN chunks c ON c.id = v.id WHERE v.site_id=?",
             (site_id,),
-        ).fetchall()
+        )
         if not rows:
             return []
         q = np.asarray(embedding, dtype=np.float32)
@@ -294,14 +351,13 @@ class NumpyVectorStore(VectorStore):
         return scored[:k]
 
     def count(self, site_id: str) -> int:
-        cur = self.db.conn.execute(
-            "SELECT COUNT(*) FROM vectors WHERE site_id=?", (site_id,)
+        cur = self.db._rows(
+            "SELECT COUNT(*) AS n FROM vectors WHERE site_id=?", (site_id,)
         )
-        return int(cur.fetchone()[0])
+        return int(cur[0]["n"])
 
     def delete_site(self, site_id: str) -> None:
-        self.db.conn.execute("DELETE FROM vectors WHERE site_id=?", (site_id,))
-        self.db.conn.commit()
+        self.db._exec("DELETE FROM vectors WHERE site_id=?", (site_id,))
 
 
 def get_vector_store(db: Database) -> VectorStore:

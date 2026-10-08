@@ -15,7 +15,7 @@ import math
 import re
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Iterator
 
 from easylink.config import Settings
 
@@ -38,6 +38,12 @@ class BaseProvider:
 
     def complete(self, system: str, user: str, history: History | None = None) -> str:
         raise NotImplementedError
+
+    def complete_stream(
+        self, system: str, user: str, history: History | None = None
+    ) -> "Iterator[str]":
+        """Yield answer text incrementally. Default: single-chunk fallback."""
+        yield self.complete(system, user, history)
 
 
 def _check(resp: Any, what: str) -> None:
@@ -145,6 +151,69 @@ class GeminiProvider(BaseProvider):
         except (KeyError, IndexError) as exc:
             raise ProviderError(f"unexpected chat response: {exc}") from exc
 
+    def complete_stream(
+        self, system: str, user: str, history: History | None = None
+    ) -> Iterator[str]:
+        """Server-sent-events streaming variant of generateContent."""
+        contents: list[dict] = []
+        for turn in history or []:
+            contents.append({"role": "user", "parts": [{"text": turn["q"]}]})
+            contents.append({"role": "model", "parts": [{"text": turn["a"]}]})
+        contents.append({"role": "user", "parts": [{"text": user}]})
+        payload = {
+            "contents": contents,
+            "systemInstruction": {"parts": [{"text": system}]},
+            "generationConfig": {"temperature": self.temperature},
+        }
+
+        import time as _time
+
+        last_exc: Exception | None = None
+        for attempt in range(6):  # open with backoff; mid-stream errors raise
+            req = urllib.request.Request(
+                f"{self.BASE}/models/{self.chat_model}:streamGenerateContent?alt=sse",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"x-goog-api-key": self.key, "Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    for raw in resp:
+                        line = raw.decode("utf-8", "ignore").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        body = line[5:].strip()
+                        if not body or body == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(body)
+                            parts = event["candidates"][0]["content"]["parts"]
+                        except (ValueError, KeyError, IndexError):
+                            continue
+                        for part in parts:
+                            text = part.get("text", "")
+                            if text:
+                                yield text
+                return
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "ignore")[:250]
+                try:
+                    detail = json.loads(detail)["error"]["message"]
+                except Exception:
+                    pass
+                last_exc = ProviderError(f"chat failed ({exc.code}): {detail}")
+                if exc.code in (429, 500, 503) and attempt < 5:
+                    _time.sleep(min(2**attempt, 16))
+                    continue
+                raise last_exc from exc
+            except urllib.error.URLError as exc:
+                last_exc = ProviderError(f"chat failed: {exc.reason}")
+                if attempt < 5:
+                    _time.sleep(min(2**attempt, 16))
+                    continue
+                raise last_exc from exc
+        raise last_exc or ProviderError("chat failed")
+
 
 # --------------------------------------------------------------------------- #
 # OpenAI
@@ -201,6 +270,28 @@ class OpenAIProvider(BaseProvider):
             messages=messages,
         )
         return (resp.choices[0].message.content or "").strip()
+
+    def complete_stream(
+        self, system: str, user: str, history: History | None = None
+    ) -> Iterator[str]:
+        messages: list[dict] = [{"role": "system", "content": system}]
+        for turn in history or []:
+            messages.append({"role": "user", "content": turn["q"]})
+            messages.append({"role": "assistant", "content": turn["a"]})
+        messages.append({"role": "user", "content": user})
+
+        stream = self._client.chat.completions.create(
+            model=self._chat_model,
+            temperature=self._temperature,
+            messages=messages,
+            stream=True,
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
 
 
 # --------------------------------------------------------------------------- #
@@ -295,6 +386,19 @@ class MockProvider(BaseProvider):
         if best_score < 2 or not best_passage:
             return ""
         return best_passage
+
+    def complete_stream(
+        self, system: str, user: str, history: History | None = None
+    ) -> Iterator[str]:
+        """Mock has nothing to stream — yield the full text in a few pieces
+        so the widget's streaming path still gets exercised."""
+        text = self.complete(system, user, history)
+        if not text:
+            yield ""
+            return
+        step = max(len(text) // 4, 1)
+        for i in range(0, len(text), step):
+            yield text[i : i + step]
 
 
 # --------------------------------------------------------------------------- #

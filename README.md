@@ -1,9 +1,10 @@
-# EasyLink AI — Phase 1: Core RAG CLI
+# EasyLink AI — Phase 1 (Core RAG CLI) + Phase 2 (API & Embeddable Widget)
 
 Give any website a brain you can talk to.
 
-**Phase 1 proves one thing:** can this AI answer questions about a website
-correctly, honestly, and safely? No API, no widget, no dashboard — just the engine.
+**Phase 1** proves the engine: can this AI answer questions about a website
+correctly, honestly, and safely? **Phase 2** wraps that engine in a local API
+and ships a one-line embeddable chat widget any site can drop in.
 
 ## Setup
 
@@ -41,6 +42,41 @@ python -m easylink eval
 # Extras
 python -m easylink sites
 python -m easylink doctor
+python -m easylink embed       # Phase 2: widget token + embed snippet
+```
+
+## Phase 2 — API server & embeddable widget
+
+```powershell
+# 1. Get your site's token + one-line snippet
+python -m easylink embed
+
+# 2. Start the local API server (http://127.0.0.1:8000)
+python -m api
+
+# 3. Open the hostile-CSS test page and try the widget
+#    http://127.0.0.1:8000/test
+```
+
+Embed on any page:
+
+```html
+<script src="http://127.0.0.1:8000/widget.js" data-site="YOUR_TOKEN"></script>
+```
+
+- **Streaming:** answers render word-by-word (SSE under the hood).
+- **Shadow DOM:** the widget cannot be broken by the host page's CSS (and can't break it back).
+- **Security layers:** per-site token → origin check → per-IP + per-token rate
+  limits → per-site daily quota. Foreign origins get 403; floods get 429.
+- **Gaps:** web abstentions are logged to the same gap queue as CLI chats.
+
+Tests (server must be running):
+
+```powershell
+python tests\test_phase2_api.py            # API + security (13 checks)
+python tests\test_phase2_api.py --flood    # rate limiting (run last)
+python tests\test_phase2_api.py --quota    # daily quota (spawns its own server)
+python tests\test_phase2_widget.py         # headless-browser widget test (13 checks)
 ```
 
 ### Inside chat
@@ -85,20 +121,26 @@ charset detection (no `Â£` mojibake) · duplicate-chunk suppression.
 
 ```
 easylink/
-├── cli.py        crawl / chat / gaps / eval / sites / doctor
+├── cli.py        crawl / chat / gaps / eval / sites / doctor / embed
 ├── config.py     all caps, thresholds, .env secrets
-├── providers.py  OpenAI + mock (no lock-in — Gemini drops in later)
+├── providers.py  OpenAI + Gemini + mock (with streaming for all three)
 ├── crawler.py    responsible crawler
 ├── indexer.py    chunker + batched embeddings
 ├── store.py      SQLite records + Chroma/NumPy vectors (namespaced by site)
-├── rag.py        retrieval threshold + grounded answering
+├── rag.py        retrieval threshold + grounded answering (+ stream_answer)
 ├── gaps.py       the seed of the differentiator
 └── evals.py      quality harness
+api/
+├── server.py     FastAPI: /chat (SSE) · /widget.js · /test · /health
+├── security.py   token + origin + rate limit + daily quota
+├── static/       widget.js (Shadow DOM web component) + hostile test page
+└── __main__.py   python -m api
+tests/            API suite + headless-browser widget suite
 never_say.txt     owner-editable forbidden answers
 evals/golden.example.jsonl
 ```
 
-## Phase 1 does NOT include (by design)
+## Phase 2 does NOT include (by design)
 
-FastAPI · JS widget · dashboard · auth · hosting · ownership verification ·
-multi-tenancy · payments — those are Phase 2+.
+Dashboard · auth · payments · public hosting/HTTPS · ownership verification ·
+multi-tenancy beyond per-site tokens — those are Phase 4+.

@@ -14,3 +14,7 @@ venv/
 # editors
 .vscode/
 .idea/
+
+# test artifacts
+tests/screenshots/
+tests/_cross_origin_test.html

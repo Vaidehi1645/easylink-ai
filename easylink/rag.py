@@ -143,3 +143,49 @@ class RAGEngine:
             question=question,
             hits=hits,
         )
+
+    def stream_answer(
+        self, question: str, site_id: str, history: list[dict] | None = None
+    ):
+        """Yield {'delta': str} events, then a final {'answer': Answer} event.
+
+        Applies the same 7 layers as answer(): threshold gate before the
+        model is called, refusal detection after, gap-worthy abstentions
+        flagged on the final Answer (the caller records the gap).
+        """
+        hits, ok = self.retrieve(question, site_id)
+
+        if not ok:
+            yield {"delta": ABSTAIN_TEXT}
+            yield {"answer": Answer(ABSTAIN_TEXT, abstained=True, question=question)}
+            return
+
+        user_prompt = build_user_prompt(question, hits)
+        parts: list[str] = []
+        for piece in self.provider.complete_stream(self.system, user_prompt, history):
+            if piece:
+                parts.append(piece)
+                yield {"delta": piece}
+
+        text = "".join(parts).strip()
+        if not text:
+            yield {"answer": Answer(ABSTAIN_TEXT, abstained=True, question=question)}
+            return
+        if is_refusal(text):
+            yield {"answer": Answer(text=text, abstained=True, question=question)}
+            return
+
+        sources: list[str] = []
+        for h in hits:
+            if h["url"] not in sources:
+                sources.append(h["url"])
+        yield {
+            "answer": Answer(
+                text=text,
+                sources=sources,
+                scores=[h["score"] for h in hits],
+                abstained=False,
+                question=question,
+                hits=hits,
+            )
+        }

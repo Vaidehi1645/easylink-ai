@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EasyLink widget — hostile CSS isolation test</title>
+<style>
+  /* ============================================================
+     HOSTILE CSS — deliberately attacks every generic element.
+     If the chat bubble/panel still looks clean and indigo,
+     Shadow DOM isolation is working. That's the point.
+     ============================================================ */
+  * {
+    border-radius: 0 !important;
+    font-family: "Comic Sans MS", "Papyrus", cursive !important;
+    letter-spacing: 3px !important;
+    text-transform: uppercase;
+  }
+  div, p, h1 {
+    background: red !important;
+    color: yellow !important;
+    border: 4px dashed lime !important;
+    padding: 30px !important;
+    margin: 10px !important;
+  }
+  button {
+    background: black !important;
+    color: lime !important;
+    font-size: 40px !important;
+    width: 100% !important;
+    display: block !important;
+  }
+  input {
+    width: 100% !important;
+    background: pink !important;
+    color: purple !important;
+    font-size: 28px !important;
+  }
+  form { display: block !important; background: orange !important; }
+  a { text-decoration: line-through !important; color: magenta !important; }
+  span { background: olive !important; color: cyan !important; font-size: 30px !important; }
+</style>
+</head>
+<body>
+  <h1>Hostile-CSS isolation test</h1>
+  <p>Site: <span id="sitename">__SITE__</span> — this page hates other people's styles on purpose.</p>
+  <p>If the floating bubble and chat panel look <strong>clean, rounded and indigo</strong> despite the garbage above, the widget's Shadow DOM isolation works.</p>
+  <div>Even plain divs are destroyed here — red, yellow, dashed borders everywhere.</div>
+  <p>Test checklist: open the bubble &rarr; ask "What is on this site?" &rarr; watch words stream in &rarr; check source links &rarr; ask something off-topic &rarr; confirm the honest "I don't know".</p>
+  <script src="/widget.js" data-site="__TOKEN__"></script>
+</body>
+</html>
