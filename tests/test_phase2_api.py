@@ -8,6 +8,7 @@ Run (with the server already running in another terminal):
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -18,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from easylink.store import Database  # noqa: E402
 
-BASE = "http://127.0.0.1:8000"
+# Override to test a second server instance:  $env:EL_TEST_BASE="http://127.0.0.1:8002"
+BASE = os.environ.get("EL_TEST_BASE", "http://127.0.0.1:8000")
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -203,7 +205,14 @@ def main() -> int:
           f"{len(ans.get('sources', []))} sources")
 
     # ------------------------------------------------- abstention + gap logging
-    before = len(db.list_gaps(site["id"], 999))
+    def swallow_state():
+        # Phase 3 dedupe: re-asks merge into ONE row (count grows) instead of
+        # inserting new rows — so accept either signal as "logged".
+        rows = [r for r in db.list_gaps(site["id"], 999)
+                if "airspeed" in r["question"].lower()]
+        return len(rows), sum(int(r["count"] or 1) for r in rows)
+
+    rows_before, asks_before = swallow_state()
     code, raw, _ = req("/chat",
                        {"token": token, "question": "What is the airspeed velocity of an unladen swallow?"},
                        headers={"Origin": "http://127.0.0.1:8000"})
@@ -211,10 +220,12 @@ def main() -> int:
     answers = [e["answer"] for e in events if "answer" in e]
     ans = answers[0] if answers else {}
     time.sleep(0.5)
-    after = len(db.list_gaps(site["id"], 999))
+    rows_after, asks_after = swallow_state()
     check("off-topic question -> honest abstention", ans.get("abstained") is True,
           str(ans.get("text", ""))[:50])
-    check("abstention auto-logged as a gap", after > before, f"{before} -> {after}")
+    check("abstention auto-logged as a gap",
+          rows_after > rows_before or asks_after > asks_before,
+          f"rows {rows_before}->{rows_after}, asks {asks_before}->{asks_after}")
 
     # ------------------------------------------------- per-site isolation
     other = db.get_site("Example Test")

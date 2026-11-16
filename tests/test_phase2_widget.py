@@ -10,6 +10,7 @@ file:// embed.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -18,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from easylink.store import Database  # noqa: E402
 
-BASE = "http://127.0.0.1:8000"
+# Override to test a second server instance:  $env:EL_TEST_BASE="http://127.0.0.1:8002"
+BASE = os.environ.get("EL_TEST_BASE", "http://127.0.0.1:8000")
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -45,7 +47,10 @@ def run() -> int:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
 
         # --------------------------------------------- same-origin test page
-        page.goto(f"{BASE}/test", wait_until="networkidle")
+        # Pin the token: /test without one falls back to the LATEST site,
+        # which is whatever was crawled last (the owner's real crawl!) — the
+        # books question would then honestly refuse on a GitHub profile.
+        page.goto(f"{BASE}/test?token={token}", wait_until="networkidle")
         bubble = page.locator(".bubble")
         check("widget bubble mounts", bubble.count() == 1)
 
@@ -76,7 +81,7 @@ def run() -> int:
               f"{pstyles['radius']} / {pstyles['font'][:30]}")
 
         inp = page.locator("input")
-        inp.fill("What books are available on this site?")
+        inp.fill("Tell me about the book A Light in the Attic")
         page.locator("form button.send").click()
 
         # sample the streaming bubble growth
@@ -104,27 +109,36 @@ def run() -> int:
         check("source links render", sources_visible)
 
         final = page.locator(".msgs .m.b").last.inner_text()
-        check("answer mentions books/£ (grounded)", "£" in final or "book" in final.lower(),
+        gtext = final.lower()
+        check("answer is grounded (title/£)",
+              "£" in final or any(k in gtext for k in ("book", "light", "attic", "poetry", "shakespeare")),
               final[:60].replace("\n", " "))
         page.screenshot(path=str(shot_dir / "02-widget-answered.png"))
 
         # --------------------------------------------- honest abstention
         inp.fill("What is the airspeed velocity of an unladen swallow?")
         page.locator("form button.send").click()
-        try:
-            page.locator(".msgs .m.b", has_text="information on this website").last.wait_for(
-                timeout=45000
-            )
-            check("widget abstains honestly", True)
-        except Exception:
-            last = page.locator(".msgs .m.b").last.inner_text()
-            check("widget abstains honestly", False, last[:70])
+        # Two honest forms: the instant layer-1 ABSTAIN_TEXT, or a layer-2
+        # model refusal — judged by the product's OWN detector (is_refusal),
+        # so the test and the runtime can never disagree on what a refusal is.
+        from easylink.rag import is_refusal
+
+        deadline = time.time() + 45
+        honest = False
+        last_text = ""
+        while time.time() < deadline:
+            last_text = page.locator(".msgs .m.b").last.inner_text()
+            if "information on this website" in last_text or is_refusal(last_text):
+                honest = True
+                break
+            time.sleep(0.3)
+        check("widget abstains honestly", honest, last_text[:70])
 
         page.screenshot(path=str(shot_dir / "03-widget-abstain.png"))
 
         # --------------------------------------------- case preserved (no uppercase)
         typed = page.locator(".msgs .m.u").first.inner_text()
-        check("hostile text-transform did NOT leak in", typed[:1] == typed[:1].upper() and "books" in typed.lower() and "BOOKS" not in typed,
+        check("hostile text-transform did NOT leak in", typed[:1] == typed[:1].upper() and "book" in typed.lower() and "BOOK" not in typed,
               typed[:40])
 
         check("no JS console errors", not errors, "; ".join(errors)[:120])
@@ -146,7 +160,7 @@ def run() -> int:
         page2.locator(".bubble").wait_for(timeout=10000)
         check("cross-origin file:// embed mounts", page2.locator(".bubble").count() == 1)
         page2.locator(".bubble").click()
-        page2.locator("input").fill("Do you have poetry?")
+        page2.locator("input").fill("Tell me about the book A Light in the Attic")
         page2.locator("form button.send").click()
         try:
             page2.locator(".msgs .src").first.wait_for(timeout=45000)

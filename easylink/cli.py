@@ -132,8 +132,10 @@ def cmd_chat(args) -> int:
         print("This site has no vectors. Re-run crawl.")
         return 1
 
-    engine = RAGEngine(provider, vs, s, site["name"], site["url"])
+    engine = RAGEngine(provider, vs, s, site["name"], site["url"], db=db)
     print(f"\nEasyLink chat — {site['name']}")
+    if getattr(args, "site", None) in (None, "latest"):
+        print(f"  (latest site — switch any time: chat --site \"<name>\")")
     print(f"  {site['chunk_count']} chunks | provider {provider.name} | "
           f"threshold {engine.threshold:.2f}")
     print("  Commands: /quit  /gaps  /help\n")
@@ -157,8 +159,8 @@ def cmd_chat(args) -> int:
         if user == "/gaps":
             print(show_gaps(db, site_id))
             continue
-        if user in ("👎", "down", "bad") and last_question:
-            record_gap(db, site_id, last_question, "owner_downvote")
+        if user in ("\U0001F44E", "down", "bad") and last_question:
+            record_gap(db, site_id, last_question, "owner_downvote", provider=provider)
             print("  noted — logged as a knowledge gap for the owner.\n")
             continue
 
@@ -175,14 +177,14 @@ def cmd_chat(args) -> int:
 
         print(f"\nbot > {answer.text}")
         if answer.abstained:
-            record_gap(db, site_id, user, "no_match")
-            print("      (no match — logged to gap queue)\n")
+            record_gap(db, site_id, user, "no_match", provider=provider)
+            print("      (no match — logged to gap queue)")
         else:
             history.append({"q": user, "a": answer.text})
             history = history[-4:]  # keep context small & cheap
-            if answer.sources:
-                print(f"      sources: {', '.join(answer.sources[:4])}")
-            print()
+        if answer.sources:
+            print(f"      sources: {', '.join(answer.sources[:4])}")
+        print()
     return 0
 
 
@@ -212,7 +214,139 @@ def cmd_gaps(args) -> int:
     if getattr(args, "site", None):
         site = db.get_site(args.site)
         site_id = site["id"] if site else None
-    print(show_gaps(db, site_id))
+    print(show_gaps(db, site_id, resolved=getattr(args, "resolved", False)))
+    return 0
+
+
+def cmd_questions(args) -> int:
+    """Phase 3: AI drafts precise questions for the OWNER."""
+    from easylink.providers import get_provider
+    from easylink.questions import generate_questions, scan_site, show_questions
+    from easylink.store import Database, get_vector_store
+
+    s = load_settings()
+    db = Database()
+    site = _require_site(db, args)
+    provider = get_provider(s)
+
+    if args.scan:
+        print(f"Scanning {site['name']} — what does the site fail to explain?")
+        drafted = scan_site(db, provider, s, site, max_pages=args.pages)
+        if not drafted:
+            print("  Nothing new found — either the site explains itself well")
+            print("  or these questions were already drafted:")
+        else:
+            print(f"  {len(drafted)} new question(s) drafted from the site itself:\n")
+            for item in drafted:
+                print(f"  · {item['topic']}")
+                print(f"    Q: {item['question']}")
+                print(f"    Why: {item['why']}")
+                print(f"    (page: {item['page']})\n")
+    else:
+        vs = get_vector_store(db)
+        print(f"Drafting questions for {site['name']} (top {args.top} open gaps)...")
+        drafted = generate_questions(
+            db, provider, vs, s, site, top_n=args.top, regen=args.regen
+        )
+        if not drafted:
+            print("  Nothing new — top gaps already have pending questions.")
+        else:
+            print(f"  {len(drafted)} question(s) drafted:\n")
+            for item in drafted:
+                print(f"  · {item['topic']}  (visitors asked x{item.get('gap_count', 1)})")
+                print(f"    Q: {item['question']}")
+                print(f"    Why: {item['why']}\n")
+
+    print(show_questions(db, site))
+    return 0
+
+
+def cmd_answer(args) -> int:
+    """Phase 3: owner answers a drafted question -> fact + gap resolved."""
+    from easylink.facts import add_fact
+    from easylink.providers import get_provider
+    from easylink.store import Database
+
+    s = load_settings()
+    db = Database()
+    site = _require_site(db, args)
+    site_id = site["id"]
+
+    def store(question: str, answer: str, qid: int | None) -> None:
+        provider = get_provider(s)
+        add_fact(db, site_id, question, answer, provider=provider)
+        if qid is not None:
+            row = db.get_question(qid)
+            if row:
+                db.set_question_status(qid, "answered")
+                if row["gap_id"]:
+                    db.resolve_gap(row["gap_id"])
+        print(f"\n  \u2713 Learned! The AI will now answer:")
+        print(f'    Q: {question}')
+        print(f'    A: {answer}')
+        if qid is not None:
+            print("  \u2713 Related gap marked resolved.")
+        print("\n  Test it: easylink chat, then ask the same question.\n")
+
+    # Non-interactive path (scripts/tests): --id + --answer
+    if args.id is not None:
+        row = db.get_question(args.id)
+        if row is None or row["site_id"] != site_id:
+            print(f"No question #{args.id} on this site.")
+            return 1
+        if not args.answer:
+            print("Missing --answer \"your answer\"")
+            return 1
+        store(row["question"], args.answer, args.id)
+        return 0
+
+    # Interactive: list pending questions, pick one, type the answer
+    from easylink.questions import show_questions
+
+    pending = db.list_questions(site_id, "pending")
+    if not pending:
+        # Never a dead end: say WHICH site was checked, why, and where the
+        # questions actually are (default = latest site, which silently
+        # switching contexts is exactly how owners get confused).
+        default_used = not getattr(args, "site", None)
+        print(f"No pending questions for '{site['name']}'"
+              + (" (default: latest site — you passed no --site)" if default_used else "")
+              + ".")
+        others = db.pending_by_site(exclude_site_id=site_id)
+        for r in others:
+            print(f"  -> {r['n']} waiting on '{r['name']}'  ->  "
+                  f'easylink answer --site "{r["name"]}"')
+        if not others:
+            print("First run:  easylink questions        (from visitor gaps)")
+            print("       or:  easylink questions --scan  (proactive site review)")
+        return 0
+    print(show_questions(db, site))
+    try:
+        choice = input("\nQuestion number to answer (Enter to quit): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 0
+    if not choice:
+        return 0
+    try:
+        qid = int(choice)
+    except ValueError:
+        print("Not a number.")
+        return 1
+    row = db.get_question(qid)
+    if row is None or row["site_id"] != site_id:
+        print(f"No question #{qid} on this site.")
+        return 1
+    print(f"\n  Q: {row['question']}")
+    try:
+        answer = input("  A: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 0
+    if not answer:
+        print("  (no answer given — nothing saved)")
+        return 0
+    store(row["question"], answer, qid)
     return 0
 
 
@@ -227,7 +361,7 @@ def cmd_eval(args) -> int:
     site = _require_site(db, args)
     provider = get_provider(s)
     vs = get_vector_store(db)
-    engine = RAGEngine(provider, vs, s, site["name"], site["url"])
+    engine = RAGEngine(provider, vs, s, site["name"], site["url"], db=db)
     run_eval(engine, db, site["id"], golden_file=args.file, use_llm=args.llm)
     return 0
 
@@ -287,7 +421,22 @@ def main(argv: list[str] | None = None) -> int:
 
     g = sub.add_parser("gaps", help="show unanswered questions")
     g.add_argument("--site", default=None)
+    g.add_argument("--resolved", action="store_true", help="show closed gaps")
     g.set_defaults(func=cmd_gaps)
+
+    q = sub.add_parser("questions", help="AI drafts questions for YOU (Phase 3)")
+    q.add_argument("--site", default=None, help="site id or name (default: latest)")
+    q.add_argument("--top", type=int, default=5, help="how many top gaps to draft for")
+    q.add_argument("--scan", action="store_true", help="proactive: review the site itself")
+    q.add_argument("--pages", type=int, default=10, help="max pages to scan")
+    q.add_argument("--regen", action="store_true", help="redraft pending gap questions")
+    q.set_defaults(func=cmd_questions)
+
+    a = sub.add_parser("answer", help="answer a drafted question -> AI learns (Phase 3)")
+    a.add_argument("--site", default=None, help="site id or name (default: latest)")
+    a.add_argument("--id", type=int, help="question id to answer (non-interactive)")
+    a.add_argument("--answer", help="your answer (required with --id)")
+    a.set_defaults(func=cmd_answer)
 
     e = sub.add_parser("eval", help="quality report")
     e.add_argument("--site", default="latest")

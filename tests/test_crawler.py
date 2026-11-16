@@ -1,0 +1,253 @@
+"""Crawler prioritization suite — offline (fake session, zero network, zero cost).
+
+Covers the fix for a real bug reported on a live crawl of
+github.com/Vaidehi1645: the frontier was plain FIFO, links are collected in
+DOM order, and every site's <header> marketing nav comes before its <main>.
+18 of 20 pages fetched were GitHub marketing pages — the owner's repos were
+never crawled, answers were built from a polluted pool, and citations
+pointed at irrelevant pages.
+
+Run:  venv\\Scripts\\python.exe tests\\test_crawler.py
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from easylink import crawler
+from easylink.config import Settings
+from easylink.crawler import collect_links, crawl, link_tier, normalize_url
+
+RESULTS: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> None:
+    RESULTS.append((name, ok, detail))
+    print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""))
+
+
+# --------------------------------------------------------------------------- #
+# Fixtures — a miniature GitHub-style profile site
+# --------------------------------------------------------------------------- #
+BASE = "https://ex.test"
+
+# Header marketing nav (DOM order: comes FIRST), then main content:
+# profile tab nav (a <nav> — chrome by tag, rescued by path affinity),
+# pinned repo links, then the legal footer.
+PROFILE_HTML = f"""
+<html><body>
+<header><nav>
+  <a href="/features">Features</a>
+  <a href="/pricing">Pricing</a>
+  <a href="/solutions">Solutions</a>
+</nav></header>
+<main>
+  <nav class="tabs">
+    <a href="/vaidehi?tab=repositories">Repositories</a>
+    <a href="/vaidehi?tab=stars">Stars</a>
+  </nav>
+  <a href="/vaidehi/easylink-ai">easylink-ai</a>
+  <a href="/vaidehi/sias">sias</a>
+  <p>Profile of Vaidehi — AI developer. Pinned projects and activity live
+     on this page, repositories are one tab away.</p>
+</main>
+<footer>
+  <a href="/site/terms">Terms</a>
+  <a href="/site/privacy">Privacy</a>
+</footer>
+</body></html>
+"""
+
+HOME_HTML = f"""
+<html><body>
+<header><nav><a href="/features">Features</a></nav></header>
+<main>
+  <h1>Welcome</h1>
+  <p>{"Home page content for the extractor. " * 8}</p>
+  <a href="/about">About us</a>
+</main>
+</body></html>
+"""
+
+
+def page(title: str) -> str:
+    body = f"<h1>{title}</h1><p>{(title + ' page content. ') * 12}</p>"
+    return f"<html><head><title>{title}</title></head><body><main>{body}</main></body></html>"
+
+
+class FakeResp:
+    def __init__(self, url: str, text: str = "", status: int = 200):
+        self.url = url
+        self.text = text
+        self.content = text.encode("utf-8")
+        self.status_code = status
+        self.headers = {"Content-Type": "text/html; charset=utf-8"}
+        self.apparent_encoding = "utf-8"
+        self.encoding = "utf-8"
+
+
+class FakeSession:
+    """Serves canned pages for the fake site and records fetch order."""
+
+    def __init__(self, pages: dict[str, str]):
+        self.pages = pages
+        self.headers: dict[str, str] = {}
+        self.fetched: list[str] = []
+
+    def get(self, url, **kwargs):
+        self.fetched.append(url)
+        if url.endswith(("robots.txt", "sitemap.xml")):
+            return FakeResp(url, "", 404)
+        if url in self.pages:
+            return FakeResp(url, self.pages[url])
+        return FakeResp(url, "", 404)
+
+
+def run_crawl(pages: dict[str, str], start: str, max_pages: int) -> tuple[list[str], object]:
+    """Crawl the fake site offline; return (content fetches in order, result)."""
+    made: list[FakeSession] = []
+
+    def factory():
+        s = FakeSession(pages)
+        made.append(s)
+        return s
+
+    original = crawler.requests.Session
+    crawler.requests.Session = factory
+    try:
+        settings = Settings(
+            max_pages=max_pages, max_depth=3, politeness_delay=0.0, page_timeout=5.0
+        )
+        result = crawl(start, settings, log=lambda *a, **k: None)
+    finally:
+        crawler.requests.Session = original
+    order = [u for u in made[0].fetched if not u.endswith(("robots.txt", "sitemap.xml"))]
+    return order, result
+
+
+# --------------------------------------------------------------------------- #
+print("\n===== URL + link classification =====")
+
+check(
+    "tab query survives normalize (?tab=repositories stays distinct)",
+    normalize_url("https://ex.test/vaidehi?tab=repositories")
+    == "https://ex.test/vaidehi?tab=repositories",
+    "tab is content, not noise",
+)
+
+links = dict(collect_links(PROFILE_HTML, f"{BASE}/vaidehi"))
+check(
+    "header marketing links marked chrome",
+    links.get(f"{BASE}/features") is True,
+)
+check(
+    "profile tab nav marked chrome by tag (affinity rescues it in link_tier)",
+    links.get(f"{BASE}/vaidehi?tab=repositories") is True,
+)
+check(
+    "pinned repo link in main marked content",
+    links.get(f"{BASE}/vaidehi/easylink-ai") is False,
+)
+check("footer links marked chrome", links.get(f"{BASE}/site/terms") is True)
+
+# --------------------------------------------------------------------------- #
+print("\n===== link_tier ranking =====")
+
+check(
+    "tier 0: path affinity beats chrome (nav tab under seed root)",
+    link_tier(f"{BASE}/vaidehi?tab=repositories", "/vaidehi", True) == 0,
+)
+check(
+    "tier 0: child of seed root is on-subject",
+    link_tier(f"{BASE}/vaidehi/easylink-ai", "/vaidehi", False) == 0,
+)
+check(
+    "tier 1: off-subject content link",
+    link_tier(f"{BASE}/blog/post", "/vaidehi", False) == 1,
+)
+check(
+    "tier 2: off-subject chrome link",
+    link_tier(f"{BASE}/features", "/vaidehi", True) == 2,
+)
+check(
+    "homepage seed (root='/'): content stays tier 1, chrome tier 2",
+    link_tier(f"{BASE}/about", "/", False) == 1
+    and link_tier(f"{BASE}/features", "/", True) == 2,
+)
+
+# --------------------------------------------------------------------------- #
+print("\n===== crawl order: profile budget goes to repos, not marketing =====")
+
+profile_pages = {
+    f"{BASE}/": page("Home"),
+    f"{BASE}/vaidehi": PROFILE_HTML,
+    f"{BASE}/vaidehi?tab=repositories": page("Repositories"),
+    f"{BASE}/vaidehi?tab=stars": page("Stars"),
+    f"{BASE}/vaidehi/easylink-ai": page("easylink-ai"),
+    f"{BASE}/vaidehi/sias": page("sias"),
+    f"{BASE}/features": page("Features"),
+    f"{BASE}/pricing": page("Pricing"),
+    f"{BASE}/solutions": page("Solutions"),
+    f"{BASE}/site/terms": page("Terms"),
+    f"{BASE}/site/privacy": page("Privacy"),
+}
+# NOTE: the seed is the profile itself, matching the reported live crawl.
+order, result = run_crawl(profile_pages, f"{BASE}/vaidehi", max_pages=4)
+
+expected = [
+    f"{BASE}/vaidehi",
+    f"{BASE}/vaidehi?tab=repositories",
+    f"{BASE}/vaidehi?tab=stars",
+    f"{BASE}/vaidehi/easylink-ai",
+]
+check(
+    "crawl starts at the seed",
+    order and order[0] == f"{BASE}/vaidehi",
+    f"first={order[0] if order else None}",
+)
+check(
+    "tabs + pinned repos fill the 4-page budget, in DOM order",
+    order == expected,
+    f"got={[u.replace(BASE, '') for u in order]}",
+)
+check(
+    "NO marketing/chrome page fetched while tier 0 remains "
+    "(the reported bug: /features was page 10 and 20)",
+    not any(u in (f"{BASE}/features", f"{BASE}/pricing") for u in order),
+    "header nav untouched",
+)
+check(
+    "pages actually captured match the budget",
+    len(result.pages) == 4,
+    f"pages={len(result.pages)}",
+)
+
+# --------------------------------------------------------------------------- #
+print("\n===== crawl order: homepage falls back to content, then chrome =====")
+
+home_pages = {
+    f"{BASE}/": HOME_HTML,
+    f"{BASE}/about": page("About"),
+    f"{BASE}/features": page("Features"),
+}
+home_order, _ = run_crawl(home_pages, f"{BASE}/", max_pages=3)
+
+check(
+    "homepage: content link (/about) before chrome (/features)",
+    home_order == [f"{BASE}/", f"{BASE}/about", f"{BASE}/features"],
+    f"got={[u.replace(BASE, '') for u in home_order]}",
+)
+check(
+    "chrome still reachable when cheaper tiers drain (no starvation)",
+    f"{BASE}/features" in home_order,
+)
+
+# --------------------------------------------------------------------------- #
+passed = sum(1 for _, ok, _ in RESULTS if ok)
+failed = len(RESULTS) - passed
+print(f"\n{'=' * 60}\nCRAWLER SUITE: {passed}/{len(RESULTS)} passed"
+      + (f" — {failed} FAILED" if failed else ""))
+sys.exit(1 if failed else 0)

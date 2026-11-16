@@ -37,7 +37,7 @@ app = FastAPI(title="EasyLink AI API", version="0.2.0")
 def engine_for(site) -> RAGEngine:
     eng = _engines.get(site["id"])
     if eng is None:
-        eng = RAGEngine(provider, vectors, settings, site["name"], site["url"])
+        eng = RAGEngine(provider, vectors, settings, site["name"], site["url"], db=db)
         _engines[site["id"]] = eng
     return eng
 
@@ -61,16 +61,19 @@ def _clean_history(raw) -> list[dict]:
 async def cors(request: Request, call_next):
     origin = request.headers.get("origin")
     if request.method == "OPTIONS":
-        return Response(
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": origin or "null",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "content-type",
-                "Access-Control-Max-Age": "600",
-                "Vary": "Origin",
-            },
-        )
+        headers = {
+            "Access-Control-Allow-Origin": origin or "null",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            "Access-Control-Allow-Headers": "content-type",
+            "Access-Control-Max-Age": "600",
+            "Vary": "Origin",
+        }
+        # A page on a PUBLIC site calling a localhost API gets a Private
+        # Network Access preflight from Chrome; without this answer the
+        # widget on a live site is refused before it even starts.
+        if request.headers.get("access-control-request-private-network"):
+            headers["Access-Control-Allow-Private-Network"] = "true"
+        return Response(status_code=204, headers=headers)
     response = await call_next(request)
     if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
@@ -115,7 +118,7 @@ async def chat(request: Request):
                 else:
                     ans = event["answer"]
                     if ans.abstained:
-                        record_gap(db, site["id"], question, "no_match")
+                        record_gap(db, site["id"], question, "no_match", provider=provider)
                     payload = {
                         "answer": {
                             "text": ans.text,

@@ -125,9 +125,15 @@ def extract_content(html: str, url: str) -> tuple[str, str]:
     return title or url, text
 
 
-def collect_links(html: str, base_url: str) -> list[str]:
+def collect_links(html: str, base_url: str) -> list[tuple[str, bool]]:
+    """(absolute_url, in_chrome) for every crawlable link, in DOM order.
+
+    in_chrome marks site furniture — header/nav/footer/aside links that
+    appear on every page of the site (global marketing nav, legal footer).
+    The crawler ranks content links ahead of chrome; see link_tier.
+    """
     soup = BeautifulSoup(html, "lxml")
-    out = []
+    out: list[tuple[str, bool]] = []
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         if href.startswith(("#", "javascript:", "mailto:", "tel:")):
@@ -135,8 +141,37 @@ def collect_links(html: str, base_url: str) -> list[str]:
         absolute = urljoin(base_url, href)
         if _BAD_EXT.search(urlparse(absolute).path):
             continue
-        out.append(absolute)
+        if a.find_parent(["nav", "footer", "aside"]):
+            in_chrome = True
+        elif a.find_parent("header") and not a.find_parent(["main", "article"]):
+            in_chrome = True
+        else:
+            in_chrome = False
+        out.append((absolute, in_chrome))
     return out
+
+
+def link_tier(url: str, seed_root: str, in_chrome: bool) -> int:
+    """Frontier rank — lower tiers crawl first; the queue only falls to a
+    higher tier when every cheaper tier is empty.
+
+      0 = on-subject: shares the seed's first path segment (profile tabs,
+          section menus, pages under the seeded area) — even when in the nav
+      1 = content link elsewhere on the same site
+      2 = site chrome (global header/footer links)
+
+    Why this exists: a plain FIFO queue followed links in DOM order, and
+    every site's <header> marketing nav comes before its <main>. A crawl of
+    github.com/someone spent 18 of its 20 pages on GitHub's marketing pages
+    and never reached the person's repositories — so answers were built from
+    a polluted page pool. (tested: tests/test_crawler.py)
+    """
+    path = urlparse(url).path
+    if seed_root and seed_root != "/" and (
+        path == seed_root or path.startswith(seed_root + "/")
+    ):
+        return 0
+    return 2 if in_chrome else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -237,7 +272,14 @@ def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
     result = CrawlResult()
     seen: set[str] = set()
     visited_hashes: set[str] = set()
-    queue: deque[tuple[str, int]] = deque()
+
+    # Three-tier frontier (see link_tier): on-subject links first, then
+    # other content, then site chrome. Plain FIFO put the global header nav
+    # ahead of the page's own content, so small page budgets were spent on
+    # marketing pages instead of the site's actual subject.
+    tiers: list[deque[tuple[str, int]]] = [deque(), deque(), deque()]
+    seed_path = urlparse(start).path.strip("/")
+    seed_root = "/" + seed_path.split("/")[0] if seed_path else "/"
 
     # --- phase A: sitemap-first ---
     try:
@@ -248,19 +290,19 @@ def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
             if not robots.can_fetch(settings.user_agent, n):
                 continue
             seen.add(n)
-            queue.append((n, 1))
+            tiers[1].append((n, 1))
     except Exception:
         pass
 
     if start not in seen:
         seen.add(start)
-        queue.appendleft((start, 0))
+        tiers[0].append((start, 0))
 
-    log(f"  queue: {len(queue)} urls discovered (sitemap + seed)")
+    log(f"  queue: {sum(len(t) for t in tiers)} urls discovered (sitemap + seed)")
 
-    # --- phase B: bounded BFS ---
-    while queue and len(result.pages) < settings.max_pages:
-        url, depth = queue.popleft()
+    # --- phase B: bounded BFS, cheapest tier first ---
+    while any(tiers) and len(result.pages) < settings.max_pages:
+        url, depth = next(t.popleft() for t in tiers if t)
         if depth > settings.max_depth:
             continue
         if is_trap(url):
@@ -309,7 +351,7 @@ def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
         # discover more (only when depth budget remains)
         if depth < settings.max_depth:
             try:
-                for link in collect_links(resp.text, resp.url):
+                for link, in_chrome in collect_links(resp.text, resp.url):
                     n = normalize_url(link)
                     if (
                         n
@@ -319,7 +361,9 @@ def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
                         and robots.can_fetch(settings.user_agent, n)
                     ):
                         seen.add(n)
-                        queue.append((n, depth + 1))
+                        tiers[link_tier(n, seed_root, in_chrome)].append(
+                            (n, depth + 1)
+                        )
             except Exception:
                 result.errors += 1
 
