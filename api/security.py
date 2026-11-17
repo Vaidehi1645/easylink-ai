@@ -20,8 +20,9 @@ from urllib.parse import urlparse
 from easylink.config import Settings
 
 
-def origin_allowed(origin: str | None, site_url: str) -> bool:
-    """Allow: the site's own host, localhost (dev test pages), file:// (null),
+def origin_allowed(origin: str | None, site_url: str, own_host: str | None = None) -> bool:
+    """Allow: the site's own host, this server's own host (the demo page is
+    served by us, so it is trusted), localhost (dev test pages), file:// (null),
     and missing origins (curl / server-to-server)."""
     if not origin or origin == "null":
         return True
@@ -29,6 +30,8 @@ def origin_allowed(origin: str | None, site_url: str) -> bool:
     host = o.netloc or o.path
     site_host = urlparse(site_url).netloc
     if host == site_host:
+        return True
+    if own_host and host == own_host:
         return True
     if host.startswith("localhost") or host.startswith("127.0.0.1"):
         return True
@@ -62,9 +65,10 @@ class Guard:
         origin: str | None,
         site_row,
         usage_today: int,
+        own_host: str | None = None,
     ) -> tuple[int, str] | None:
         """None = allowed. (status, message) = blocked."""
-        if not origin_allowed(origin, site_row["url"]):
+        if not origin_allowed(origin, site_row["url"], own_host):
             return 403, "this widget is not allowed on that website"
         if not self._allow(f"ip:{ip}", self.ip_per_minute):
             return 429, "too many requests — please slow down"

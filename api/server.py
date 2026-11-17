@@ -100,7 +100,8 @@ async def chat(request: Request):
 
     ip = request.client.host if request.client else "unknown"
     verdict = guard.check(
-        ip, token, request.headers.get("origin"), site, db.usage_today(site["id"])
+        ip, token, request.headers.get("origin"), site, db.usage_today(site["id"]),
+        own_host=request.headers.get("host", ""),
     )
     if verdict:
         code, msg = verdict
