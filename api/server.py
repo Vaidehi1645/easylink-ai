@@ -3,7 +3,7 @@
 Wraps the existing RAGEngine — zero new AI logic. Provides:
   POST /chat     -> SSE-streamed, grounded answers (the widget's only endpoint)
   GET  /widget.js-> the embeddable web component
-  GET  /test     -> hostile-CSS isolation test page (dev only)
+  GET  /test     -> demo page (clean by default; hostile-CSS attack mode on toggle)
   GET  /health   -> liveness + config summary
 """
 

@@ -54,6 +54,12 @@ def run() -> int:
         bubble = page.locator(".bubble")
         check("widget bubble mounts", bubble.count() == 1)
 
+        # Flip the page into HOSTILE mode so the isolation checks below run
+        # against a real attack stylesheet, not a clean page.
+        page.locator("#hostile-toggle").click()
+        hostile = page.evaluate("() => document.getElementById('hostile-css').media")
+        check("hostile CSS mode activates", hostile == "all", f"media={hostile}")
+
         styles = bubble.evaluate(
             """el => { const s = getComputedStyle(el);
                   return {radius: s.borderRadius, bg: s.backgroundColor}; }"""

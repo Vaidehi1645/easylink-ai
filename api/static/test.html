@@ -2,13 +2,55 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>EasyLink widget — hostile CSS isolation test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EasyLink AI — Live Demo</title>
 <style>
-  /* ============================================================
-     HOSTILE CSS — deliberately attacks every generic element.
-     If the chat bubble/panel still looks clean and indigo,
-     Shadow DOM isolation is working. That's the point.
-     ============================================================ */
+  /* ===================== clean demo styling ===================== */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f6f7fb;
+    color: #1f2430;
+    line-height: 1.55;
+  }
+  header { background: #4f46e5; color: #fff; padding: 30px 20px 26px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+  h1 { margin: 6px 0 4px; font-size: 30px; }
+  .sub { opacity: .92; font-size: 15px; }
+  main { max-width: 760px; margin: 24px auto; padding: 0 20px; display: grid; gap: 16px; }
+  .card {
+    background: #fff; border: 1px solid #e6e8f0; border-radius: 14px;
+    padding: 18px 20px; box-shadow: 0 6px 18px rgba(31, 36, 48, .06);
+  }
+  .card h2 { margin: 0 0 10px; font-size: 16px; color: #4f46e5; }
+  ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; font-size: 15px; }
+  code {
+    background: #eef0ff; color: #3730a3; font-size: 13px;
+    padding: 1px 7px; border-radius: 6px;
+  }
+  .shield { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .shield p { margin: 0; font-size: 14px; color: #5b6172; }
+  #hostile-toggle {
+    background: #4f46e5; color: #fff; border: 0; border-radius: 10px;
+    padding: 11px 17px; font-size: 14px; font-weight: 600; cursor: pointer;
+    white-space: nowrap;
+  }
+  #hostile-toggle:hover { filter: brightness(1.08); }
+  footer { text-align: center; color: #8a90a3; font-size: 13px; padding: 8px 0 96px; }
+</style>
+</head>
+<body>
+
+<!-- ======================================================================
+     HOSTILE CSS — deliberately attacks every generic element on this page.
+     It ships DISABLED (media="none") so the demo looks clean; the button
+     below flips it on. If the chat bubble/panel still look clean and
+     indigo under attack, Shadow DOM isolation is working. That's the point.
+     (The API suite greps this comment for "HOSTILE" — keep the word.)
+====================================================================== -->
+<style id="hostile-css" media="none">
   * {
     border-radius: 0 !important;
     font-family: "Comic Sans MS", "Papyrus", cursive !important;
@@ -39,13 +81,49 @@
   a { text-decoration: line-through !important; color: magenta !important; }
   span { background: olive !important; color: cyan !important; font-size: 30px !important; }
 </style>
-</head>
-<body>
-  <h1>Hostile-CSS isolation test</h1>
-  <p>Site: <span id="sitename">__SITE__</span> — this page hates other people's styles on purpose.</p>
-  <p>If the floating bubble and chat panel look <strong>clean, rounded and indigo</strong> despite the garbage above, the widget's Shadow DOM isolation works.</p>
-  <div>Even plain divs are destroyed here — red, yellow, dashed borders everywhere.</div>
-  <p>Test checklist: open the bubble &rarr; ask "What is on this site?" &rarr; watch words stream in &rarr; check source links &rarr; ask something off-topic &rarr; confirm the honest "I don't know".</p>
-  <script src="/widget.js" data-site="__TOKEN__"></script>
+
+<header>
+  <div class="wrap">
+    <div class="logo">🔗 EasyLink AI</div>
+    <h1>Live Demo</h1>
+    <div class="sub">Grounded answers about <strong>__SITE__</strong> — streamed live, every claim linked to its source.</div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>💬 What to try</h2>
+    <ul>
+      <li><code>What is on this site?</code> — a grounded answer, streamed word by word</li>
+      <li>Check the <strong>source links</strong> under each answer — only pages the reply actually used</li>
+      <li><code>Do you offer scuba diving lessons?</code> — honest "I don't know", and <em>no</em> links</li>
+      <li>Ask what today's date is — the bot knows what day it is</li>
+    </ul>
+  </section>
+
+  <section class="card shield">
+    <div>
+      <h2>🛡️ Shadow DOM isolation</h2>
+      <p>The widget can't be broken by a host page's CSS — and can't break it back. Flip the switch to attack this page with deliberately terrible styles and watch the widget stay clean.</p>
+    </div>
+    <button id="hostile-toggle" type="button">💥 Turn hostile CSS ON</button>
+  </section>
+</main>
+
+<footer>Powered by EasyLink AI · no source, no claim</footer>
+
+<script src="/widget.js" data-site="__TOKEN__"></script>
+<script>
+  (function () {
+    var btn = document.getElementById("hostile-toggle");
+    var style = document.getElementById("hostile-css");
+    var on = false;
+    btn.addEventListener("click", function () {
+      on = !on;
+      style.media = on ? "all" : "none";
+      btn.textContent = on ? "😈 Hostile CSS ON — is the widget still clean?" : "💥 Turn hostile CSS ON";
+    });
+  })();
+</script>
 </body>
 </html>

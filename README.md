@@ -94,7 +94,8 @@ python -m easylink embed
 # 2. Start the local API server (http://127.0.0.1:8000)
 python -m api
 
-# 3. Open the hostile-CSS test page and try the widget
+# 3. Open the demo page and try the widget (flip the hostile-CSS switch
+#    to watch Shadow DOM isolation survive a real CSS attack)
 #    http://127.0.0.1:8000/test
 ```
 
@@ -182,7 +183,7 @@ easylink/
 api/
 ├── server.py     FastAPI: /chat (SSE) · /widget.js · /test · /health
 ├── security.py   token + origin + rate limit + daily quota
-├── static/       widget.js (Shadow DOM web component) + hostile test page
+├── static/       widget.js (Shadow DOM web component) + demo test page
 └── __main__.py   python -m api
 tests/            API suite + browser suite + Phase 3 gap-engine suite
 never_say.txt     owner-editable forbidden answers
