@@ -161,10 +161,10 @@ def main() -> int:
     check("GET /widget.js -> 200 + shadow DOM code",
           code == 200 and "attachShadow" in raw and "data-site" in raw, f"{len(raw)} bytes")
 
-    # ---------------------------------------------------------- test page
+    # ---------------------------------------------------------- demo page
     code, raw, _ = req(f"/test?token={token}")
-    check("GET /test -> 200 + hostile CSS + token",
-          code == 200 and "HOSTILE" in raw and token in raw)
+    check("GET /test?token -> 200 + how-it-works + token",
+          code == 200 and "How it works" in raw and token in raw)
 
     # ------------------------------------------------------- auth: bad token
     code, raw, _ = req("/chat", {"token": "deadbeef" * 4, "question": "hi"})

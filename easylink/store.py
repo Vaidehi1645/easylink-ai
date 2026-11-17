@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import numpy as np
 
@@ -27,6 +28,31 @@ def normalize_question(question: str) -> str:
     q = re.sub(r"[^\w\s]", " ", q)
     q = re.sub(r"\s+", " ", q).strip()
     return q
+
+
+def _norm_host(netloc: str) -> str:
+    """jewelsmars.com / www.Jewelsmars.com:443 -> jewelsmars.com"""
+    h = (netloc or "").lower().split("@")[-1].split(":")[0].strip(".")
+    return h[4:] if h.startswith("www.") else h
+
+
+# TLDs dropped when building a readable /demo/<slug> base
+_COMMON_TLDS = {
+    "com", "net", "org", "io", "ai", "co", "in", "uk", "us", "ca", "de",
+    "fr", "au", "jp", "br", "za", "nl", "it", "es", "ch", "se", "no",
+    "fi", "pl", "ru", "cn", "kr", "sg", "hk", "nz", "ie", "mx", "app",
+    "dev", "shop", "store", "xyz", "info", "biz", "me", "tv", "cc",
+    "online", "site", "tech", "space", "fun",
+}
+
+
+def slug_base(url: str) -> str:
+    """https://www.jewelsmars.com/some/path -> 'jewelsmars' (demo slug base)."""
+    labels = [l for l in _norm_host(urlparse(url).netloc).split(".") if l]
+    if len(labels) > 1 and labels[-1] in _COMMON_TLDS:
+        labels = labels[:-1]
+    base = re.sub(r"[^a-z0-9-]+", "-", "-".join(labels)).strip("-")
+    return (base or "site")[:48]
 
 
 def vec_cosine(a, b) -> float:
@@ -141,6 +167,9 @@ class Database:
             cols = [r[1] for r in self.conn.execute("PRAGMA table_info(sites)")]
             if "token" not in cols:
                 self.conn.execute("ALTER TABLE sites ADD COLUMN token TEXT")
+            # migration: shareable demo slugs (Phase 6)
+            if "slug" not in cols:
+                self.conn.execute("ALTER TABLE sites ADD COLUMN slug TEXT")
             # migration: gap dedupe/ranking (Phase 3)
             gap_cols = [r[1] for r in self.conn.execute("PRAGMA table_info(gaps)")]
             for col, decl in (
@@ -267,6 +296,51 @@ class Database:
             return None
         rows = self._rows("SELECT * FROM sites WHERE token=?", (token,))
         return rows[0] if rows else None
+
+    # -- demo slugs + host reuse (Phase 6) --------------------------------
+    def find_site_by_host(self, host: str) -> sqlite3.Row | None:
+        """Newest site crawled from this host that actually has content
+        (www-insensitive). Lets /ingest reuse an existing crawl instead of
+        paying for a second one — same site, same demo link, no new cost."""
+        want = _norm_host(host)
+        if not want:
+            return None
+        for row in self._rows(
+            "SELECT * FROM sites ORDER BY created_at DESC, rowid DESC"
+        ):
+            if int(row["chunk_count"] or 0) > 0 and _norm_host(
+                urlparse(row["url"]).netloc
+            ) == want:
+                return row
+        return None
+
+    def get_site_by_slug(self, slug: str) -> sqlite3.Row | None:
+        if not slug or len(slug) > 80:
+            return None
+        rows = self._rows("SELECT * FROM sites WHERE slug=?", (slug,))
+        return rows[0] if rows else None
+
+    def ensure_slug(self, site_id: str) -> str:
+        """Claim (or return) this site's readable /demo/<slug>.
+
+        Base comes from the domain — jewelsmars.com -> 'jewelsmars' — with a
+        numeric suffix on collision ('jewelsmars-2'). Stored once under the
+        DB lock, so the link a user shares never changes."""
+        with self.lock:
+            rows = self._rows("SELECT * FROM sites WHERE id=?", (site_id,))
+            if not rows:
+                raise ValueError(f"unknown site {site_id}")
+            if rows[0]["slug"]:
+                return rows[0]["slug"]
+            base = slug_base(rows[0]["url"])
+            slug, n = base, 1
+            while self._rows(
+                "SELECT id FROM sites WHERE slug=? AND id!=?", (slug, site_id)
+            ):
+                n += 1
+                slug = f"{base}-{n}"
+            self._exec("UPDATE sites SET slug=? WHERE id=?", (slug, site_id))
+            return slug
 
     # -- daily usage quota -------------------------------------------------
     def usage_today(self, site_id: str) -> int:

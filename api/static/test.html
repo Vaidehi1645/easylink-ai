@@ -30,57 +30,13 @@
     background: #eef0ff; color: #3730a3; font-size: 13px;
     padding: 1px 7px; border-radius: 6px;
   }
-  .shield { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-  .shield p { margin: 0; font-size: 14px; color: #5b6172; }
-  #hostile-toggle {
-    background: #4f46e5; color: #fff; border: 0; border-radius: 10px;
-    padding: 11px 17px; font-size: 14px; font-weight: 600; cursor: pointer;
-    white-space: nowrap;
-  }
-  #hostile-toggle:hover { filter: brightness(1.08); }
+  .about { margin: 0; font-size: 15px; color: #4a5063; }
+  .about + .about { margin-top: 8px; }
   footer { text-align: center; color: #8a90a3; font-size: 13px; padding: 8px 0 96px; }
+  footer a { color: #4f46e5; text-decoration: none; font-weight: 600; }
 </style>
 </head>
 <body>
-
-<!-- ======================================================================
-     HOSTILE CSS — deliberately attacks every generic element on this page.
-     It ships DISABLED (media="none") so the demo looks clean; the button
-     below flips it on. If the chat bubble/panel still look clean and
-     indigo under attack, Shadow DOM isolation is working. That's the point.
-     (The API suite greps this comment for "HOSTILE" — keep the word.)
-====================================================================== -->
-<style id="hostile-css" media="none">
-  * {
-    border-radius: 0 !important;
-    font-family: "Comic Sans MS", "Papyrus", cursive !important;
-    letter-spacing: 3px !important;
-    text-transform: uppercase;
-  }
-  div, p, h1 {
-    background: red !important;
-    color: yellow !important;
-    border: 4px dashed lime !important;
-    padding: 30px !important;
-    margin: 10px !important;
-  }
-  button {
-    background: black !important;
-    color: lime !important;
-    font-size: 40px !important;
-    width: 100% !important;
-    display: block !important;
-  }
-  input {
-    width: 100% !important;
-    background: pink !important;
-    color: purple !important;
-    font-size: 28px !important;
-  }
-  form { display: block !important; background: orange !important; }
-  a { text-decoration: line-through !important; color: magenta !important; }
-  span { background: olive !important; color: cyan !important; font-size: 30px !important; }
-</style>
 
 <header>
   <div class="wrap">
@@ -101,29 +57,29 @@
     </ul>
   </section>
 
-  <section class="card shield">
-    <div>
-      <h2>🛡️ Shadow DOM isolation</h2>
-      <p>The widget can't be broken by a host page's CSS — and can't break it back. Flip the switch to attack this page with deliberately terrible styles and watch the widget stay clean.</p>
-    </div>
-    <button id="hostile-toggle" type="button">💥 Turn hostile CSS ON</button>
+  <section class="card">
+    <h2>⚙️ How it works</h2>
+    <ul>
+      <li><strong>Paste a link</strong> → EasyLink crawls the site (public pages only, robots.txt respected, 20 pages max)</li>
+      <li><strong>Index</strong> → every page is chunked and embedded, so answers retrieve in milliseconds</li>
+      <li><strong>Ask anything</strong> → replies stream word by word, each claim linked to the exact page it came from</li>
+      <li><strong>No source, no claim</strong> → if the site doesn't say it, the bot honestly says "I don't know"</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>🧩 About EasyLink</h2>
+    <p class="about">EasyLink turns any website into a grounded AI chatbot you can embed with a single
+    script tag. The widget lives in Shadow DOM, so a host page's CSS can't break it (and it can't
+    break the page back).</p>
+    <p class="about">Every answer is built only from what the site actually says: retrieval first,
+    generation second, citations always. Questions the site can't answer are captured as
+    <strong>gaps</strong> — a ranked to-do list of what to add next.</p>
   </section>
 </main>
 
-<footer>Powered by EasyLink AI · no source, no claim</footer>
+<footer>Powered by EasyLink AI · no source, no claim · <a href="/test">Build your own bot</a></footer>
 
 <script src="/widget.js" data-site="__TOKEN__"></script>
-<script>
-  (function () {
-    var btn = document.getElementById("hostile-toggle");
-    var style = document.getElementById("hostile-css");
-    var on = false;
-    btn.addEventListener("click", function () {
-      on = !on;
-      style.media = on ? "all" : "none";
-      btn.textContent = on ? "😈 Hostile CSS ON — is the widget still clean?" : "💥 Turn hostile CSS ON";
-    });
-  })();
-</script>
 </body>
 </html>

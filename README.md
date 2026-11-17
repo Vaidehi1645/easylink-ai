@@ -94,8 +94,8 @@ python -m easylink embed
 # 2. Start the local API server (http://127.0.0.1:8000)
 python -m api
 
-# 3. Open the demo page and try the widget (flip the hostile-CSS switch
-#    to watch Shadow DOM isolation survive a real CSS attack)
+# 3. Open the agent intake page — paste any legal website link, watch
+#    it crawl live, and get back a shareable /demo/<slug> link
 #    http://127.0.0.1:8000/test
 ```
 
@@ -118,6 +118,7 @@ python tests\test_phase2_api.py            # API + security (13 checks)
 python tests\test_phase2_api.py --flood    # rate limiting (run last)
 python tests\test_phase2_api.py --quota    # daily quota (spawns its own server)
 python tests\test_phase2_widget.py         # headless-browser widget test (13 checks)
+python tests\test_phase6_ingest.py         # self-serve intake + SSRF + quota (23 checks)
 ```
 
 ### Inside chat
@@ -129,6 +130,27 @@ python tests\test_phase2_widget.py         # headless-browser widget test (13 ch
 | `👎` | flag the previous answer as a knowledge gap |
 | `/gaps` | list unanswered questions |
 | `/quit` | exit |
+
+## Phase 6 — self-serve agent intake
+
+`GET /test` (no token) is now an **agent**: paste any valid & legal
+website link and watch it crawl live, then take back two outputs:
+
+```text
+demo link    http://your-host/demo/<slug>   -> clean page + widget for that site
+snippet      <script src=".../widget.js" data-site="TOKEN"></script>
+```
+
+- **`POST /ingest`** streams the crawl as SSE: `start` → `fetch` (every
+  page + status) → `index` → `done`/`error`.
+- **Guards:** http(s) only · **SSRF blocked** (only publicly routable
+  addresses are ever fetched — every redirect hop re-checked via
+  `GuardedSession`) · **10 crawls/day/IP** (`EASYLINK_CRAWL_DAILY`) ·
+  **20 pages max** per crawl · robots.txt + politeness delays (built in).
+- **Reuse:** the same host is crawled once — re-pasting it returns the
+  same link instantly and spends nothing (no fetches, no embeddings).
+- `GET /demo/<slug>` serves the demo page; slugs are domain-derived and
+  stable (`jewelsmars.com` → `/demo/jewelsmars`, `…-2` on collision).
 
 ## The 7 anti-hallucination layers (1–7 live in Phase 1)
 
@@ -181,11 +203,11 @@ easylink/
 ├── facts.py      Phase 3: owner-verified facts (highest prompt authority)
 └── evals.py      quality harness
 api/
-├── server.py     FastAPI: /chat (SSE) · /widget.js · /test · /health
-├── security.py   token + origin + rate limit + daily quota
-├── static/       widget.js (Shadow DOM web component) + demo test page
+├── server.py     FastAPI: /chat (SSE) · /ingest (SSE crawl) · /widget.js · /test · /demo/<slug> · /health
+├── security.py   token + origin + rate limit + daily quota + crawl quota
+├── static/       widget.js + demo test page + agent intake page
 └── __main__.py   python -m api
-tests/            API suite + browser suite + Phase 3 gap-engine suite
+tests/            API + browser + Phase 3 gap-engine + Phase 6 ingest suites
 never_say.txt     owner-editable forbidden answers
 evals/golden.example.jsonl
 ```

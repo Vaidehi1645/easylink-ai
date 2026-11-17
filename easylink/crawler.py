@@ -7,12 +7,17 @@ Built-in safety from the risk register:
 - URL normalization + content-hash dedupe (loop killers)
 - trap detection (pagination / calendars / session ids)
 - per-page timeout, one job never crashes the system
+- SSRF guard (fetch_verdict / GuardedSession): when the server crawls a
+  user-pasted URL, only publicly routable addresses are ever fetched —
+  including every hop of a redirect chain
 """
 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
+import socket
 import time
 import urllib.robotparser
 import xml.etree.ElementTree as ET
@@ -43,6 +48,64 @@ _TRAP_PATTERNS = re.compile(
     r"|/login|/signin|/search\b|/tag/|/author/)",
     re.I,
 )
+
+
+# ---------------------------------------------------------------- safety ----
+def fetch_verdict(url: str) -> tuple[bool, str]:
+    """SSRF guard: may OUR SERVER safely fetch this URL?
+
+    Returns (True, "") only for http(s) URLs whose host resolves EXCLUSIVELY
+    to publicly routable addresses. Blocks localhost, private ranges
+    (10/8, 172.16/12, 192.168/16), link-local (cloud metadata 169.254.x),
+    CGNAT, and anything else `ipaddress` considers non-global — the classic
+    SSRF targets. Used both as a pre-flight check (/ingest) and on every
+    request a GuardedSession sends (each redirect hop re-checked)."""
+    try:
+        parts = urlparse(url)
+    except Exception:
+        return False, "that doesn't look like a valid web address"
+    if parts.scheme not in ("http", "https"):
+        return False, "only http:// and https:// links are supported"
+    host = parts.hostname
+    if not host:
+        return False, "that doesn't look like a valid web address"
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return False, "that address has an invalid port"
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, OSError):
+        return False, "couldn't find that website — check the spelling"
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False, "that address doesn't look valid"
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped  # ::ffff:127.0.0.1 -> check the IPv4 truth
+        if not ip.is_global:
+            return False, "that link points to a private/internal address — not allowed"
+    return True, ""
+
+
+class GuardedSession(requests.Session):
+    """Session that re-runs fetch_verdict on EVERY request it sends.
+
+    requests calls Session.send() for the initial request AND for each
+    redirect hop, so one override covers the whole chain: a public site
+    that 302s to 169.254.169.254 (cloud metadata) or localhost never gets
+    fetched. Redirects are also capped (default 5)."""
+
+    def __init__(self, max_redirects: int = 5):
+        super().__init__()
+        self.max_redirects = max_redirects
+
+    def send(self, request, **kwargs):
+        ok, why = fetch_verdict(request.url)
+        if not ok:
+            raise requests.RequestException(f"blocked by SSRF guard: {why}")
+        return super().send(request, **kwargs)
 
 
 def normalize_url(url: str) -> str | None:
@@ -256,13 +319,23 @@ class CrawlResult:
     errors: int = 0
 
 
-def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
+def crawl(
+    start_url: str,
+    settings: Settings,
+    log=print,
+    safe: bool = False,
+    on_fetch=None,
+) -> CrawlResult:
+    """Crawl start_url. `safe=True` (user-pasted URLs, Phase 6) swaps in a
+    GuardedSession — SSRF-checked on every request/redirect hop. `on_fetch`
+    (if given) is called after each attempt as on_fetch(url, status|None)
+    to drive the live crawl feed."""
     start = normalize_url(start_url)
     if not start:
         raise ValueError(f"Not a valid http(s) URL: {start_url}")
 
     host = urlparse(start).netloc
-    session = requests.Session()
+    session: requests.Session = GuardedSession() if safe else requests.Session()
     session.headers.update({
         "User-Agent": settings.user_agent,
         "Accept": "text/html,application/xhtml+xml",
@@ -316,7 +389,12 @@ def crawl(start_url: str, settings: Settings, log=print) -> CrawlResult:
             resp = session.get(url, timeout=settings.page_timeout, allow_redirects=True)
         except Exception:
             result.errors += 1
+            if on_fetch:
+                on_fetch(url, None)
             continue
+
+        if on_fetch:
+            on_fetch(url, resp.status_code)
 
         time.sleep(settings.politeness_delay)  # politeness, same host only
 

@@ -44,7 +44,10 @@ class Guard:
         self.ip_per_minute = int(os.environ.get("EASYLINK_RATE_IP", "30"))
         self.token_per_minute = int(os.environ.get("EASYLINK_RATE_TOKEN", "120"))
         self.daily_quota = int(os.environ.get("EASYLINK_DAILY_QUOTA", "500"))
+        # Self-serve crawl quota (Phase 6): crawls cost fetches + embeddings.
+        self.crawl_daily = int(os.environ.get("EASYLINK_CRAWL_DAILY", "10"))
         self._hits: dict[str, deque] = defaultdict(deque)
+        self._crawls: dict[str, tuple[str, int]] = {}
         self._lock = threading.Lock()
 
     def _allow(self, key: str, limit: int) -> bool:
@@ -76,4 +79,20 @@ class Guard:
             return 429, "this widget is receiving too many messages"
         if usage_today >= self.daily_quota:
             return 429, "daily message limit reached — try again tomorrow"
+        return None
+
+    def check_crawl(self, ip: str) -> tuple[int, str] | None:
+        """Crawl quota (Phase 6): N crawls per IP per day.
+
+        Called ONLY when a crawl will actually run — reusing an existing
+        crawl is free (no fetches, no embeddings), so it never spends quota.
+        None = allowed to crawl; (429, msg) = blocked."""
+        day = time.strftime("%Y-%m-%d")
+        with self._lock:
+            seen_day, n = self._crawls.get(ip, (day, 0))
+            if seen_day != day:
+                n = 0  # new day -> counter resets
+            if n >= self.crawl_daily:
+                return 429, "daily crawl limit reached — try again tomorrow"
+            self._crawls[ip] = (day, n + 1)
         return None

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EasyLink AI — Build your bot</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(160deg, #eef0ff 0%, #f6f7fb 45%, #eef0ff 100%);
+    color: #1f2430;
+    line-height: 1.55;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 18px;
+  }
+  .stage { width: 100%; max-width: 640px; text-align: center; }
+  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #4f46e5; }
+  h1 { margin: 8px 0 22px; font-size: 30px; color: #1f2430; }
+  h1 span { color: #4f46e5; }
+
+  .agent {
+    background: #fff; border: 1px solid #e6e8f0; border-radius: 20px;
+    padding: 26px 24px 24px; text-align: left;
+    box-shadow: 0 18px 45px rgba(31, 36, 48, .10);
+  }
+  .who { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .avatar {
+    width: 46px; height: 46px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 32% 30%, #818cf8, #4f46e5 70%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; box-shadow: 0 4px 12px rgba(79, 70, 229, .35);
+  }
+  .who b { font-size: 15px; }
+  .who small { display: block; color: #8a90a3; font-size: 12px; font-weight: 400; }
+  .bubble {
+    background: #eef0ff; border: 1px solid #dfe2ff; border-radius: 4px 16px 16px 16px;
+    padding: 13px 16px; font-size: 15.5px; color: #2b3049; margin-bottom: 16px;
+  }
+  .bubble.warn { background: #fff1f2; border-color: #ffd7dd; color: #9f1239; }
+  .bubble.yay { background: #ecfdf5; border-color: #c9f3e1; color: #065f46; }
+
+  form { display: flex; gap: 10px; }
+  #url {
+    flex: 1; min-width: 0; padding: 13px 15px; font-size: 15px;
+    border: 1.5px solid #d8dbe7; border-radius: 12px; outline: none;
+    font-family: inherit; background: #fbfbfe;
+  }
+  #url:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, .14); }
+  #go {
+    background: #4f46e5; color: #fff; border: 0; border-radius: 12px;
+    padding: 13px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+    white-space: nowrap; font-family: inherit;
+  }
+  #go:hover { filter: brightness(1.08); }
+  #go:disabled { background: #a5a8d8; cursor: wait; }
+  .hint { margin: 9px 2px 0; font-size: 12.5px; color: #8a90a3; }
+
+  .feed {
+    margin-top: 16px; background: #14162b; color: #9ee7c5; border-radius: 12px;
+    padding: 12px 14px; font: 12.5px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    max-height: 250px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .feed .dim { color: #6b7194; }
+  .feed .head { color: #8ea2ff; }
+
+  .result { margin-top: 16px; border: 1.5px dashed #c9cef5; border-radius: 14px; padding: 15px 16px; background: #fafaff; }
+  .result h3 { margin: 0 0 12px; font-size: 15.5px; color: #065f46; }
+  .result label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #6b7194; margin: 10px 0 5px; }
+  .copyrow { display: flex; gap: 8px; }
+  .copyrow input {
+    flex: 1; min-width: 0; padding: 9px 11px; font-size: 13.5px; border: 1px solid #d8dbe7;
+    border-radius: 9px; background: #fff; color: #3730a3; font-family: ui-monospace, Consolas, monospace;
+  }
+  .copyrow button {
+    background: #4f46e5; color: #fff; border: 0; border-radius: 9px;
+    padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .copyrow button:active { transform: translateY(1px); }
+  .open {
+    display: inline-block; margin-top: 13px; background: #16a34a; color: #fff;
+    text-decoration: none; font-weight: 600; font-size: 14.5px;
+    padding: 10px 18px; border-radius: 11px;
+  }
+  .open:hover { filter: brightness(1.08); }
+
+  .steps { display: flex; gap: 10px; justify-content: center; margin: 22px 2px 0; flex-wrap: wrap; }
+  .step {
+    background: #fff; border: 1px solid #e6e8f0; border-radius: 999px;
+    padding: 8px 15px; font-size: 13.5px; color: #5b6172;
+  }
+  .step b {
+    display: inline-flex; width: 19px; height: 19px; border-radius: 50%;
+    background: #4f46e5; color: #fff; font-size: 11.5px; align-items: center;
+    justify-content: center; margin-right: 6px;
+  }
+  footer { margin-top: 26px; color: #8a90a3; font-size: 13px; }
+  footer a { color: #4f46e5; text-decoration: none; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="logo">🔗 EasyLink AI</div>
+  <h1>Turn any website into a <span>chatbot</span></h1>
+
+  <section class="agent">
+    <div class="who">
+      <div class="avatar">🤖</div>
+      <div><b>EasyLink Agent</b><small>online — give me a link</small></div>
+    </div>
+
+    <div class="bubble" id="greet">
+      Hi! Paste any website link — it must be <b>valid &amp; legal</b> — and I'll crawl it,
+      learn from it, and hand you back a shareable bot.
+    </div>
+
+    <form id="form" autocomplete="off">
+      <input id="url" type="text" inputmode="url" placeholder="https://example.com" aria-label="Website link">
+      <button id="go" type="submit">Build my bot</button>
+    </form>
+    <div class="hint">Public pages only · robots.txt respected · max 20 pages per crawl</div>
+
+    <div class="feed" id="feed" hidden></div>
+
+    <div class="result" id="result" hidden>
+      <h3>✅ Your bot is ready!</h3>
+      <label>Demo link — anyone can open it and chat</label>
+      <div class="copyrow">
+        <input id="link" readonly>
+        <button id="copylink" type="button">Copy</button>
+      </div>
+      <label>Embed snippet — paste into any website's HTML</label>
+      <div class="copyrow">
+        <input id="snippet" readonly>
+        <button id="copysnip" type="button">Copy</button>
+      </div>
+      <a class="open" id="open" href="#" target="_blank" rel="noopener">Open my bot ↗</a>
+    </div>
+  </section>
+
+  <div class="steps">
+    <div class="step"><b>1</b>Paste a link</div>
+    <div class="step"><b>2</b>Watch it learn</div>
+    <div class="step"><b>3</b>Share the bot</div>
+  </div>
+
+  <footer>EasyLink AI · grounded answers — no source, no claim · <a href="/health">status</a></footer>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById("form");
+  var input = document.getElementById("url");
+  var go = document.getElementById("go");
+  var greet = document.getElementById("greet");
+  var feed = document.getElementById("feed");
+  var result = document.getElementById("result");
+  var linkIn = document.getElementById("link");
+  var snipIn = document.getElementById("snippet");
+  var openA = document.getElementById("open");
+
+  function say(html, cls) {
+    greet.className = "bubble" + (cls ? " " + cls : "");
+    greet.innerHTML = html;
+  }
+  function line(text, cls) {
+    var d = document.createElement("div");
+    if (cls) d.className = cls;
+    d.textContent = text;
+    feed.appendChild(d);
+    feed.scrollTop = feed.scrollHeight;
+  }
+  function fail(msg) {
+    say("⚠️ " + msg, "warn");
+  }
+  function copy(btn, value) {
+    function done() {
+      var old = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = old; }, 1400);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done, function () { fallback(); });
+    } else { fallback(); }
+    function fallback() {
+      var t = document.createElement("textarea");
+      t.value = value; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy"); done(); } catch (e) {}
+      document.body.removeChild(t);
+    }
+  }
+  document.getElementById("copylink").addEventListener("click", function () { copy(this, linkIn.value); });
+  document.getElementById("copysnip").addEventListener("click", function () { copy(this, snipIn.value); });
+
+  function handle(ev) {
+    if (ev.type === "start") {
+      line("🔗 " + ev.url, "head");
+      line("On it — crawling now, you'll see every page I touch…", "dim");
+    } else if (ev.type === "reuse") {
+      line("♻️  I already know this site — reusing the last crawl (instant, free)", "dim");
+    } else if (ev.type === "fetch") {
+      line("→ " + ev.url + (ev.status ? "   (" + ev.status + ")" : "   (failed)"));
+    } else if (ev.type === "log") {
+      line(ev.text, "dim");
+    } else if (ev.type === "index") {
+      line("⚙️  " + ev.text, "dim");
+    } else if (ev.type === "done") {
+      line("✅ done — " + ev.pages + " pages, " + ev.chunks + " chunks indexed", "head");
+      linkIn.value = ev.link;
+      snipIn.value = ev.snippet;
+      openA.href = ev.link;
+      result.hidden = false;
+      say("Done! Your bot for <b>" + ev.site + "</b> is ready — grab the link below 👇", "yay");
+    } else if (ev.type === "error") {
+      fail(ev.message);
+    }
+  }
+
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var url = input.value.trim();
+    result.hidden = true;
+    feed.hidden = false;
+    feed.innerHTML = "";
+
+    var parsed = null;
+    try { parsed = new URL(url); } catch (err) { parsed = null; }
+    if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+      say("⚠️ That doesn't look like a valid web address — try something like <b>https://example.com</b>", "warn");
+      return;
+    }
+
+    go.disabled = true;
+    go.textContent = "Crawling…";
+    say("Crawling <b>" + parsed.hostname + "</b> — watch below 👇");
+
+    try {
+      var resp = await fetch("/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url })
+      });
+
+      if (!resp.ok) {
+        var msg = "Something went wrong — try again";
+        var ct = resp.headers.get("content-type") || "";
+        if (ct.indexOf("json") >= 0) {
+          var j = await resp.json().catch(function () { return {}; });
+          msg = j.error || msg;
+        }
+        fail(msg);
+      } else {
+        var reader = resp.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "";
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buf += dec.decode(chunk.value, { stream: true });
+          var idx;
+          while ((idx = buf.indexOf("\n\n")) >= 0) {
+            var block = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            var lines = block.split("\n");
+            for (var i = 0; i < lines.length; i++) {
+              if (lines[i].indexOf("data:") === 0) {
+                try { handle(JSON.parse(lines[i].slice(5).trim())); } catch (err) {}
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      fail("I couldn't reach the server — is it running?");
+    }
+
+    go.disabled = false;
+    go.textContent = "Build my bot";
+  });
+})();
+</script>
+</body>
+</html>
