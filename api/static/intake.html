@@ -37,6 +37,17 @@
   }
   .who b { font-size: 15px; }
   .who small { display: block; color: #8a90a3; font-size: 12px; font-weight: 400; }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #16a34a; margin-right: 5px; vertical-align: 1px;
+    animation: pulse 1.8s infinite;
+  }
+  .dot.off { background: #ef4444; animation: none; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(22, 163, 74, .45); }
+    70% { box-shadow: 0 0 0 7px rgba(22, 163, 74, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+  }
   .bubble {
     background: #eef0ff; border: 1px solid #dfe2ff; border-radius: 4px 16px 16px 16px;
     padding: 13px 16px; font-size: 15.5px; color: #2b3049; margin-bottom: 16px;
@@ -75,7 +86,8 @@
   .result label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #6b7194; margin: 10px 0 5px; }
   .learned { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: #374151; max-height: 132px; overflow: auto; }
   .learned li { margin: 3px 0; }
-  .learned li.more { list-style: none; margin-left: -18px; color: #6b7194; font-style: italic; }
+  .learned li.more { list-style: none; margin-left: -18px; color: #4f46e5; font-style: italic; font-weight: 600; cursor: pointer; }
+  .learned li.more:hover { text-decoration: underline; }
   .copyrow { display: flex; gap: 8px; }
   .copyrow input {
     flex: 1; min-width: 0; padding: 9px 11px; font-size: 13.5px; border: 1px solid #d8dbe7;
@@ -115,7 +127,7 @@
   <section class="agent">
     <div class="who">
       <div class="avatar">🤖</div>
-      <div><b>EasyLink Agent</b><small>online — give me a link</small></div>
+      <div><b>EasyLink Agent</b><small id="status"><span class="dot" id="dot"></span><span id="statustext">online — give me a link</span></small></div>
     </div>
 
     <div class="bubble" id="greet">
@@ -175,6 +187,73 @@
   var learnedWrap = document.getElementById("learnedwrap");
   var learnedList = document.getElementById("learned");
   var limited = document.getElementById("limited");
+  var dot = document.getElementById("dot");
+  var statusText = document.getElementById("statustext");
+
+  // ---- live agent status: green = reachable, red = network/server gone ----
+  var online = true;
+  var backTimer = null;
+  function setStatus(on, msg) {
+    var was = online;
+    online = on;
+    dot.className = on ? "dot" : "dot off";
+    input.disabled = !on;
+    input.placeholder = on ? "https://example.com" : "offline — check your connection";
+    if (msg) { statusText.textContent = msg; return; }
+    if (!on) { statusText.textContent = "network gone — check your connection"; return; }
+    if (!was) {
+      statusText.textContent = "back online — all good";
+      clearTimeout(backTimer);
+      backTimer = setTimeout(function () {
+        statusText.textContent = "online — give me a link";
+      }, 2600);
+    } else {
+      statusText.textContent = "online — give me a link";
+    }
+  }
+  async function ping() {
+    if (!navigator.onLine) {
+      setStatus(false, "network gone — check your connection");
+      return;
+    }
+    try {
+      var r = await fetch("/health", { cache: "no-store" });
+      setStatus(!!r.ok, r.ok ? "" : "server problem — try again shortly");
+    } catch (e) {
+      setStatus(false, "can't reach the server — is it running?");
+    }
+  }
+  window.addEventListener("online", ping);
+  window.addEventListener("offline", function () {
+    setStatus(false, "network gone — check your connection");
+  });
+  window.addEventListener("focus", ping);
+  setInterval(ping, 20000);
+  ping();
+
+  // ---- "what your bot learned": 8 shown, click "+N more" to expand/collapse ----
+  var learnedShown = false;
+  function renderLearned(items) {
+    learnedList.innerHTML = "";
+    var n = learnedShown ? items.length : Math.min(8, items.length);
+    for (var i = 0; i < n; i++) {
+      var li = document.createElement("li");
+      li.textContent = items[i];
+      learnedList.appendChild(li);
+    }
+    if (items.length > 8) {
+      var more = document.createElement("li");
+      more.className = "more";
+      more.textContent = learnedShown
+        ? "↑ show less"
+        : "…+" + (items.length - 8) + " more pages";
+      more.addEventListener("click", function () {
+        learnedShown = !learnedShown;
+        renderLearned(items);
+      });
+      learnedList.appendChild(more);
+    }
+  }
 
   function say(html, cls) {
     greet.className = "bubble" + (cls ? " " + cls : "");
@@ -232,18 +311,8 @@
       snipIn.value = ev.snippet;
       openA.href = ev.link;
       var learned = ev.learned || [];
-      learnedList.innerHTML = "";
-      learned.slice(0, 8).forEach(function (t) {
-        var li = document.createElement("li");
-        li.textContent = t;
-        learnedList.appendChild(li);
-      });
-      if (learned.length > 8) {
-        var more = document.createElement("li");
-        more.className = "more";
-        more.textContent = "…+" + (learned.length - 8) + " more pages";
-        learnedList.appendChild(more);
-      }
+      learnedShown = false;
+      renderLearned(learned);
       learnedWrap.hidden = learned.length === 0;
       if (ev.warn) {
         limited.textContent = "⚠ " + ev.warn;
@@ -260,6 +329,10 @@
 
   form.addEventListener("submit", async function (e) {
     e.preventDefault();
+    if (!online) {
+      say("⚠️ You're offline — check your internet connection", "warn");
+      return;
+    }
     var url = input.value.trim();
     result.hidden = true;
     feed.hidden = false;

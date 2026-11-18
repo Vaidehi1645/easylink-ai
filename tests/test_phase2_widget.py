@@ -68,6 +68,11 @@ def run() -> int:
         panel = page.locator(".panel")
         check("panel opens", panel.is_visible())
 
+        wdot = page.locator(".hdr .dot")
+        wcls = (wdot.get_attribute("class") or "") if wdot.count() else "missing"
+        check("widget status dot present + green",
+              wdot.count() == 1 and "off" not in wcls, wcls)
+
         pstyles = panel.evaluate(
             """el => { const s = getComputedStyle(el);
                   return {radius: s.borderRadius, bg: s.backgroundColor,
@@ -140,6 +145,28 @@ def run() -> int:
         check("typed question keeps original case (no CSS transform)",
               typed[:1] == typed[:1].upper() and "book" in typed.lower() and "BOOK" not in typed,
               typed[:40])
+
+        # --------------------------------------------- live status: offline / online
+        page.context.set_offline(True)
+        page.wait_for_timeout(500)
+        wcls = page.locator(".hdr .dot").get_attribute("class") or ""
+        wpill = page.locator(".msgs .sys.off")
+        check("offline -> red dot", "off" in wcls, wcls)
+        check("offline -> 'network gone' pill in chat",
+              wpill.count() >= 1 and "network gone" in wpill.last.inner_text(),
+              wpill.last.inner_text() if wpill.count() else "missing")
+
+        page.context.set_offline(False)
+        green = False
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            wcls = page.locator(".hdr .dot").get_attribute("class") or ""
+            if "off" not in wcls:
+                green = True
+                break
+            page.wait_for_timeout(200)
+        check("back online -> green dot", green, wcls)
+        page.screenshot(path=str(shot_dir / "06-widget-offline.png"))
 
         check("no JS console errors", not errors, "; ".join(errors)[:120])
 

@@ -164,7 +164,14 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
   honest warning when most fetches came back empty.
 - **`done` carries `learned`** — the page titles the bot actually knows —
   plus crawl `seconds`; the intake UI lists them under "What your bot
-  learned".
+  learned", showing 8 with a clickable **"+N more pages"** that expands
+  to the full list and **"↑ show less"** that collapses it back.
+- **Live status, for real:** the intake agent card and the embeddable
+  widget both show a pulsing green dot while the server answers its
+  health ping, and flip to a red **"network gone — check your
+  connection"** state the moment the network or server drops (input
+  disabled on intake, an in-chat pill on the widget) — restored
+  automatically, with a "back online" note.
 - **Bot-hostile sites say so out loud:** when most requests come back
   blocked (Amazon-class walls), the feed warns, `done` carries `warn` +
   `blocked`, the intake shows a persistent "answers will be limited"

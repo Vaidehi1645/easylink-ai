@@ -33,6 +33,11 @@
       ".hdr{background:#4f46e5;color:#fff;padding:11px 13px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:space-between;gap:8px}" +
       ".hdr .brand{font-weight:400;font-size:10.5px;opacity:.9}" +
       ".hdr .brand a{color:#fff}" +
+      ".hdr .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4ade80;margin-right:6px;vertical-align:1px;animation:elp 1.8s infinite}" +
+      ".hdr .dot.off{background:#f87171;animation:none}" +
+      "@keyframes elp{0%{box-shadow:0 0 0 0 rgba(74,222,128,.55)}70%{box-shadow:0 0 0 6px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}" +
+      ".sys{align-self:center;font-size:11.5px;color:#6b7280;background:#f3f4f6;padding:4px 11px;border-radius:999px}" +
+      ".sys.off{color:#b91c1c;background:#fef2f2}" +
       ".hdr .x{cursor:pointer;background:none;border:none;color:#fff;font-size:17px;line-height:1;padding:2px}" +
       ".msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;background:#f9fafb}" +
       ".m{max-width:88%;padding:8px 11px;border-radius:12px;font-size:13.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word}" +
@@ -54,7 +59,7 @@
       "</style>" +
       '<button class="bubble" title="Chat with us" aria-label="Open chat">\u{1F4AC}</button>' +
       '<div class="panel" hidden>' +
-      '<div class="hdr"><span>Ask us anything</span><span class="brand">Powered by <a href="https://github.com/Vaidehi1645/easylink-ai" target="_blank" rel="noopener">EasyLink AI</a></span><button class="x" aria-label="Close">\u2715</button></div>' +
+      '<div class="hdr"><span><i class="dot" title="Connected"></i>Ask us anything</span><span class="brand">Powered by <a href="https://github.com/Vaidehi1645/easylink-ai" target="_blank" rel="noopener">EasyLink AI</a></span><button class="x" aria-label="Close">\u2715</button></div>' +
       '<div class="msgs" role="log"></div>' +
       '<form><input placeholder="Type your question\u2026" maxlength="800" autocomplete="off"><button class="send" type="submit">Send</button></form>' +
       "</div>";
@@ -65,6 +70,40 @@
     var form = shadow.querySelector("form");
     var input = shadow.querySelector("input");
     var sendBtn = shadow.querySelector(".send");
+    var dot = shadow.querySelector(".dot");
+
+    // ---- live status: green = server reachable, red = network gone ----
+    // Edge-triggered: the "network gone / back online" pill appears only on
+    // a real transition, never once per ping.
+    var statusOn = true;
+    function setStatus(on, msg) {
+      var changed = on !== statusOn;
+      statusOn = on;
+      dot.className = on ? "dot" : "dot off";
+      dot.title = on ? "Connected" : "Offline";
+      if (changed && msg && !panel.hidden) {
+        var pill = document.createElement("div");
+        pill.className = "m sys" + (on ? "" : " off");
+        pill.textContent = msg;
+        msgs.appendChild(pill);
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+    }
+    function ping() {
+      if (!navigator.onLine) {
+        setStatus(false, "network gone — check your connection");
+        return;
+      }
+      fetch(base + "/health", { cache: "no-store" })
+        .then(function (r) { setStatus(!!r.ok, r.ok ? "back online" : "can't reach the server"); })
+        .catch(function () { setStatus(false, "can't reach the server"); });
+    }
+    window.addEventListener("online", ping);
+    window.addEventListener("offline", function () {
+      setStatus(false, "network gone — check your connection");
+    });
+    setInterval(ping, 20000);
+    ping();
 
     function add(cls, text) {
       var d = document.createElement("div");
@@ -112,6 +151,7 @@
         body: JSON.stringify({ token: token, question: q, history: history.slice(-4) }),
       })
         .then(function (res) {
+          if (res.ok) setStatus(true, "back online");
           if (!res.ok || !res.body) {
             return res
               .json()
@@ -208,10 +248,11 @@
           return pump();
         })
         .catch(function () {
+          setStatus(false, "network gone — check your connection");
           typing.remove();
           var errEl = document.createElement("div");
           errEl.className = "m b err";
-          errEl.textContent = "\u26A0 Can't reach the assistant right now.";
+          errEl.textContent = "\u26A0 Network gone — can't reach the assistant right now.";
           msgs.appendChild(errEl);
           msgs.scrollTop = msgs.scrollHeight;
           busy = false;
