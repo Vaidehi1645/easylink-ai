@@ -165,6 +165,10 @@ def main() -> int:
     code, raw, _ = req(f"/test?token={token}")
     check("GET /test?token -> 200 + how-it-works + token",
           code == 200 and "How it works" in raw and token in raw)
+    check("demo header logo links to GitHub",
+          'href="https://github.com/Vaidehi1645"' in raw)
+    check("demo carries the 'What this bot learned' payload",
+          "What this bot learned" in raw and "window.LEARNED_TITLES =" in raw)
 
     # ------------------------------------------------------- auth: bad token
     code, raw, _ = req("/chat", {"token": "deadbeef" * 4, "question": "hi"})

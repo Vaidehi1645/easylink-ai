@@ -116,6 +116,11 @@ class FakeProvider:
         # NAMES only one product by title
         if "ATTR" in user:
             return "The stainless steel bracelet is anti tarnish and gold plated."
+        # owner-fact citation test (Issue 1): the reply echoes the FACT's
+        # own words so fact_match() can attribute it — facts have no URL,
+        # so the engine must flag them owner-verified instead of linkless
+        if "FACTQ" in user:
+            return "Returns take 30 days with free pickup."
         if "VISITOR QUESTION" in user:
             return json.dumps(
                 {"topic": "delivery policy",
@@ -145,6 +150,7 @@ def part1_offline() -> None:
         build_system_prompt,
         build_user_prompt,
         clock_answer,
+        is_citable,
     )
     from easylink.store import Database, NumpyVectorStore
 
@@ -297,8 +303,8 @@ def part1_offline() -> None:
           f"sources={final.sources}")
 
     ans = engine3.answer("anything normal here", site_id)
-    check("answered reply echoing no page cites nothing",
-          (not ans.abstained) and ans.sources == [],
+    check("grounded answer never renders linkless (top-hit guarantee)",
+          (not ans.abstained) and ans.sources == [fake_hit["url"]],
           f"abstained={ans.abstained} sources={ans.sources}")
 
     ans = engine3.answer("TOPHIT question here", site_id)
@@ -359,6 +365,47 @@ def part1_offline() -> None:
     check("shared attributes never cite; the named page's title does",
           ans.sources == [attr_a["url"]],
           f"sources={ans.sources}")
+
+    # --- Issue 1 (missing source links): no grounded answer may reach
+    #     the visitor without a stated source. Owner facts are the one
+    #     source with no URL -> the verified flag (owner badge); error
+    #     pages are never citable, even when they top the ranking.
+    ans = engine3.answer("FACTQ what does the owner promise?", site_id)
+    check("owner-fact answer flagged verified instead of linkless",
+          (not ans.abstained) and ans.verified and ans.sources == [],
+          f"abstained={ans.abstained} verified={ans.verified} "
+          f"sources={ans.sources}")
+
+    events = list(engine3.stream_answer("FACTQ what does the owner promise?", site_id))
+    final = [e for e in events if "answer" in e][0]["answer"]
+    check("stream: owner-fact answer flagged verified too",
+          (not final.abstained) and final.verified,
+          f"verified={final.verified}")
+
+    err_hit = {
+        "url": "https://refuse.example/en-US/404",
+        "score": 0.95,
+        "text": "Page not found. Nothing here.",
+        "title": "Page not found",
+    }
+    guide_hit = {
+        "url": "https://refuse.example/docs/guide",
+        "score": 0.60,
+        "text": "The guide explains widgets in detail.",
+        "title": "Guide",
+    }
+    engine3.retrieve = lambda q, s, embedding=None: ([err_hit, guide_hit], True)
+    ans = engine3.answer("anything normal here", site_id)
+    check("error pages are never cited (guarantee skips /404)",
+          (not ans.abstained) and ans.sources == [guide_hit["url"]],
+          f"sources={ans.sources}")
+
+    check("is_citable: rejects error pages, keeps real ones",
+          not is_citable("https://x.dev/en-US/404")
+          and not is_citable("https://x.dev/404.html")
+          and not is_citable("https://x.dev/error")
+          and is_citable("https://x.dev/docs/404-tips")
+          and is_citable("https://x.dev/about"))
 
     sys_prompt = build_system_prompt("RefuseCo", "https://refuse.example", [])
     check("system prompt: partial context -> answer, not refusal",

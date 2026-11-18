@@ -17,6 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from urllib.parse import urlparse
 
 from easylink.config import Settings
 from easylink.facts import format_facts, load_facts
@@ -65,6 +66,15 @@ _CITE_STOP = frozenset(
     website within thanks feel free
     """.split()
 )
+
+# Error pages are never a source a visitor should follow: MDN answers
+# soft-404s with HTTP 200, so "/en-US/404" ("Page not found | MDN") can
+# enter the index — it must not become a citation.
+_ERROR_PATH = re.compile(r"/(?:404|410|error|not[-_]?found)(?:[/.$#?]|$)", re.I)
+
+
+def is_citable(url: str) -> bool:
+    return bool(url) and not _ERROR_PATH.search(urlparse(url).path)
 
 
 def _content_words(text: str) -> set[str]:
@@ -126,7 +136,7 @@ def filter_sources(answer_text: str, hits: list[dict]) -> list[str]:
     kept: list[str] = []
     for h in hits:
         url = h.get("url") or ""
-        if not url or url in kept:
+        if not url or url in kept or not is_citable(url):
             continue
         title_words = _content_words(h.get("title") or "")
         page_words = _content_words(h.get("text") or "")
@@ -146,10 +156,34 @@ def top_source(answer_text: str, hits: list[dict]) -> str | None:
     that" answer still cites nothing."""
     if not hits:
         return None
+    if not is_citable(hits[0].get("url") or ""):
+        return None
     answer_words = _content_words(answer_text) & _specific_words(hits)
     if answer_words & _content_words(hits[0].get("text") or ""):
         return hits[0].get("url") or None
     return None
+
+
+def fact_match(answer_text: str, facts: list[dict] | None) -> bool:
+    """True when the reply actually drew on an OWNER-VERIFIED FACT:
+    >= 2 shared content words with a fact's answer — the same citation
+    machinery used for pages.
+
+    Facts are the one source with no URL to link. Rule 2 of the prompt
+    tells the model NOT to cite a page for them, so without this the
+    answer reaches the visitor with zero attribution — a price claim
+    ("shipping is 1200 rupees") under "no source, no claim". The engine
+    flags such answers `verified` and the UI shows an owner badge."""
+    if not facts:
+        return False
+    answer_words = _content_words(answer_text)
+    if not answer_words:
+        return False
+    for f in facts:
+        fact_words = _content_words(str(f.get("answer") or ""))
+        if len(answer_words & fact_words) >= 2:
+            return True
+    return False
 
 
 # --- date awareness ----------------------------------------------------- #
@@ -239,6 +273,9 @@ class Answer:
     abstained: bool = False
     question: str = ""
     hits: list[dict] = field(default_factory=list)
+    # True when the reply drew on owner-verified facts (the source with
+    # no URL): the UI attributes it with an owner badge instead of links.
+    verified: bool = False
 
 
 class RAGEngine:
@@ -312,11 +349,21 @@ class RAGEngine:
         # discriminative body words including one unique to that page —
         # site-wide vocabulary and shared attributes can't earn links, so
         # a bare "I don't know" cites nothing while a partial answer still
-        # cites the products it named. A normal answer may fall back to
-        # its top hit when it names at least one specific word from it.
+        # cites the products it named.
+        #
+        # Two guarantees for the visitor ("no source, no claim"):
+        #   * an answer drawn on OWNER-VERIFIED FACTS is flagged
+        #     `verified` — rule 2 says facts outrank pages and have no URL
+        #     to link, so the UI shows an owner badge instead;
+        #   * every other grounded answer shows where it looked: the
+        #     guarded top hit first, else the first citable page (never
+        #     an error page).
+        verified = (not abstained) and (fact_match(text, facts) or not hits)
         sources = filter_sources(text, hits)
-        if not abstained and not sources:
-            top = top_source(text, hits)
+        if not abstained and not verified and not sources:
+            top = top_source(text, hits) or next(
+                (h["url"] for h in hits if is_citable(h["url"])), None
+            )
             if top:
                 sources = [top]
 
@@ -327,6 +374,7 @@ class RAGEngine:
             abstained=abstained,
             question=question,
             hits=hits,
+            verified=verified,
         )
 
     def stream_answer(
@@ -369,11 +417,16 @@ class RAGEngine:
             }
             return
 
-        # Same citation rule as answer(): links must relate to the reply.
+        # Same citation rule as answer(): links must relate to the reply,
+        # facts get the owner-verified flag, grounded answers never
+        # render linkless (guarded top hit -> first citable page).
         abstained = is_refusal(text)
+        verified = (not abstained) and (fact_match(text, facts) or not hits)
         sources = filter_sources(text, hits)
-        if not abstained and not sources:
-            top = top_source(text, hits)
+        if not abstained and not verified and not sources:
+            top = top_source(text, hits) or next(
+                (h["url"] for h in hits if is_citable(h["url"])), None
+            )
             if top:
                 sources = [top]
 
@@ -385,5 +438,6 @@ class RAGEngine:
                 abstained=abstained,
                 question=question,
                 hits=hits,
+                verified=verified,
             )
         }

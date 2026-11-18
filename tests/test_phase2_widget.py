@@ -146,6 +146,48 @@ def run() -> int:
               typed[:1] == typed[:1].upper() and "book" in typed.lower() and "BOOK" not in typed,
               typed[:40])
 
+        # --------------------------------------------- owner-verified fact badge
+        # Bookstore Test carries the owner fact "shipping ... 1200 rupees";
+        # facts have no URL, so the answer must arrive with the badge.
+        page.locator("form button.send:not([disabled])").wait_for(timeout=45000)
+        inp.fill("What are the shipping options and costs?")
+        page.locator("form button.send").click()
+        try:
+            page.locator(".msgs .ver").first.wait_for(timeout=45000)
+            check("owner-fact answer shows the verified badge", True)
+            page.screenshot(path=str(shot_dir / "07-owner-verified-badge.png"))
+        except Exception:
+            check("owner-fact answer shows the verified badge", False,
+                  page.locator(".msgs").inner_text()[-140:])
+
+        # --------------------------------------------- "what this bot learned"
+        # the demo page lists the crawled titles: 8 + "+N more" toggle,
+        # and the header logo links to the maker's GitHub.
+        learned_ok = toggle_ok = logo_ok = False
+        ldetail = ""
+        try:
+            total = page.evaluate("window.LEARNED_TITLES.length")
+            page.locator("#learnedcard:not([hidden])").wait_for(timeout=5000)
+            first = page.locator("#learned li:not(.more)").count()
+            has_more = page.locator("#learned li.more").count() == 1
+            learned_ok = first == min(8, total) and has_more == (total > 8)
+            ldetail = f"total={total} first={first} more={has_more}"
+            page.locator("#learned li.more").click()
+            page.wait_for_timeout(150)
+            expanded = page.locator("#learned li:not(.more)").count()
+            less_txt = page.locator("#learned li.more").inner_text()
+            toggle_ok = expanded == total and "show less" in less_txt
+            ldetail += f" -> expanded={expanded} {less_txt!r}"
+            page.screenshot(path=str(shot_dir / "08-demo-learned.png"))
+            logo_href = page.locator("header .logo").get_attribute("href") or ""
+            logo_ok = "github.com/Vaidehi1645" in logo_href
+            ldetail += f" logo={logo_href!r}"
+        except Exception as e:
+            ldetail = str(e)[:140]
+        check("demo learned card: 8 titles + '+N more' toggle", learned_ok, ldetail)
+        check("toggle expands to every crawled page + 'show less'", toggle_ok, ldetail)
+        check("demo logo links to GitHub", logo_ok, ldetail)
+
         # --------------------------------------------- live status: offline / online
         page.context.set_offline(True)
         page.wait_for_timeout(500)

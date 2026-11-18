@@ -82,6 +82,9 @@ python -m easylink chat
 - **Ranking:** `frequency × recency × buying intent` — money questions first.
 - **Owner-verified facts** are the highest authority in the prompt: they can
   answer even when page retrieval fails (layer 8 of the anti-hallucination stack).
+  Facts have no page URL to link, so those answers carry a green
+  **"✓ owner-verified"** badge instead — a claim never reaches the visitor
+  without a stated source.
 - **Reopening:** if a "resolved" gap gets re-asked, it reopens — your first
   answer wasn't enough, and the queue says so.
 
@@ -165,7 +168,12 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 - **`done` carries `learned`** — the page titles the bot actually knows —
   plus crawl `seconds`; the intake UI lists them under "What your bot
   learned", showing 8 with a clickable **"+N more pages"** that expands
-  to the full list and **"↑ show less"** that collapses it back.
+  to the full list and **"↑ show less"** that collapses it back. The
+  **demo page shows the same list** ("📚 What this bot learned" card,
+  server-rendered and HTML-escaped), so anyone opening a copied demo
+  link sees exactly what the bot knows — and what it doesn't — before
+  asking. The 🔗 EasyLink AI logo on both the intake and demo headers
+  now links to the maker's GitHub.
 - **Live status, for real:** the intake agent card and the embeddable
   widget both show a pulsing green dot while the server answers its
   health ping, and flip to a red **"network gone — check your
@@ -186,7 +194,7 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 1. **Retrieval threshold** — below the similarity floor, it never even asks the model; auto "I don't know"
 2. **Grounded system prompt** — answer ONLY from provided context
 3. **Low temperature** — facts, not creativity
-4. **Source citations** — links are filtered to the pages the reply actually drew on; a bare "I don't know" cites nothing
+4. **Source citations** — links are filtered to the pages the reply actually drew on; a bare "I don't know" cites nothing, no grounded answer can render sourceless (owner-verified badge when an owner fact answered, first-page fallback otherwise), and error pages (`/404`) are never cited
 5. **Never-say list** — `never_say.txt`, editable per your rules
 6. **Gap logging** — every failure becomes a question for the owner (Phase 3 = the queue UI)
 7. **Eval suite** — `eval` command with a golden-question file

@@ -46,6 +46,7 @@
       ".src{display:block;margin-top:6px;font-size:11px}" +
       ".src a{color:#4f46e5;text-decoration:none;display:block;margin-top:2px}" +
       ".src a:hover{text-decoration:underline}" +
+      ".ver{display:inline-block;margin-top:6px;font-size:11px;font-weight:600;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 9px;border-radius:999px}" +
       ".err{color:#b91c1c;font-size:12.5px}" +
       ".typing span{display:inline-block;width:6px;height:6px;margin-right:3px;background:#9ca3af;border-radius:50%;animation:elb 1.2s infinite}" +
       ".typing span:nth-child(2){animation-delay:.2s}" +
@@ -207,6 +208,12 @@
                 if (!text) {
                   text = answer ? answer.text : "Sorry, I couldn't answer that.";
                   answerEl.textContent = text;
+                }
+                if (answer && answer.verified) {
+                  var ver = document.createElement("span");
+                  ver.className = "ver";
+                  ver.textContent = "\u2713 owner-verified";
+                  answerEl.appendChild(ver);
                 }
                 if (answer && answer.sources && answer.sources.length) {
                   var wrap = document.createElement("span");

@@ -16,7 +16,8 @@
   }
   header { background: #4f46e5; color: #fff; padding: 30px 20px 26px; }
   .wrap { max-width: 760px; margin: 0 auto; }
-  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; color: inherit; text-decoration: none; }
+  .logo:hover { opacity: 1; }
   h1 { margin: 6px 0 4px; font-size: 30px; }
   .sub { opacity: .92; font-size: 15px; }
   .note { font-size: 12.5px; color: #8a90a3; margin-top: 7px; }
@@ -33,6 +34,9 @@
   }
   .about { margin: 0; font-size: 15px; color: #4a5063; }
   .about + .about { margin-top: 8px; }
+  .learned li { margin: 3px 0; }
+  .learned li.more { list-style: none; margin-left: -18px; color: #4f46e5; font-style: italic; font-weight: 600; cursor: pointer; }
+  .learned li.more:hover { text-decoration: underline; }
   footer { text-align: center; color: #8a90a3; font-size: 13px; padding: 8px 0 96px; }
   footer a { color: #4f46e5; text-decoration: none; font-weight: 600; }
 </style>
@@ -41,7 +45,7 @@
 
 <header>
   <div class="wrap">
-    <div class="logo">🔗 EasyLink AI</div>
+    <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer">🔗 EasyLink AI</a>
     <h1>Live Demo</h1>
     <div class="sub">Grounded answers about <strong>__SITE__</strong> — streamed live, every claim linked to its source.</div>
     <div class="note">__NOTE__</div>
@@ -57,6 +61,11 @@
       <li><code>Do you offer scuba diving lessons?</code> — honest "I don't know", and <em>no</em> links</li>
       <li>Ask what today's date is — the bot knows what day it is</li>
     </ul>
+  </section>
+
+  <section class="card" id="learnedcard" hidden>
+    <h2>📚 What this bot learned</h2>
+    <ul class="learned" id="learned"></ul>
   </section>
 
   <section class="card">
@@ -83,5 +92,36 @@
 <footer>Powered by EasyLink AI · no source, no claim · <a href="/test">Build your own bot</a></footer>
 
 <script src="/widget.js" data-site="__TOKEN__"></script>
+<script>window.LEARNED_TITLES = __LEARNED__;</script>
+<script>
+  // "What this bot learned": page titles injected by the server — 8 shown,
+  // "+N more pages" expands, same toggle as the intake page. An empty
+  // list (site with no pages) keeps the card hidden.
+  (function () {
+    var titles = window.LEARNED_TITLES || [];
+    var card = document.getElementById("learnedcard");
+    var list = document.getElementById("learned");
+    if (!titles.length) return;
+    card.hidden = false;
+    var shown = false;
+    function render() {
+      list.innerHTML = "";
+      var n = shown ? titles.length : Math.min(8, titles.length);
+      for (var i = 0; i < n; i++) {
+        var li = document.createElement("li");
+        li.textContent = titles[i];
+        list.appendChild(li);
+      }
+      if (titles.length > 8) {
+        var more = document.createElement("li");
+        more.className = "more";
+        more.textContent = shown ? "↑ show less" : "…+" + (titles.length - 8) + " more pages";
+        more.addEventListener("click", function () { shown = !shown; render(); });
+        list.appendChild(more);
+      }
+    }
+    render();
+  })();
+</script>
 </body>
 </html>

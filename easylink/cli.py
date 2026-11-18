@@ -184,6 +184,8 @@ def cmd_chat(args) -> int:
             history = history[-4:]  # keep context small & cheap
         if answer.sources:
             print(f"      sources: {', '.join(answer.sources[:4])}")
+        elif answer.verified:
+            print("      source: owner-verified")
         print()
     return 0
 

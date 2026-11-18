@@ -104,10 +104,22 @@ def _demo_html(site) -> str:
     note = f"Built from {pages} page{'s' if pages != 1 else ''} of {site['name']}"
     if 0 < pages <= 4:
         note += " — this site shares very little of its content, so answers will be limited"
+    # "What this bot learned": the crawled page titles — the same list the
+    # intake page shows, so a visitor sees the bot's actual knowledge (and
+    # its limits) before asking. Injected as JSON inside <script>: escape
+    # line separators and "</" so a hostile page title can't break out.
+    titles = db.page_titles(site["id"])
+    learned = (
+        json.dumps(titles, ensure_ascii=False)
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+        .replace("</", "<\\/")
+    )
     return (
         html.replace("__TOKEN__", real_token)
         .replace("__SITE__", site["name"])
         .replace("__NOTE__", note)
+        .replace("__LEARNED__", learned)
     )
 
 
@@ -182,6 +194,7 @@ async def chat(request: Request):
                             "text": ans.text,
                             "sources": ans.sources,
                             "abstained": ans.abstained,
+                            "verified": ans.verified,
                         }
                     }
                     yield "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"

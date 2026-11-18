@@ -53,6 +53,11 @@ def run() -> int:
         check("starts green + online", "off" not in cls and "online" in txt,
               f"class={cls!r} text={txt!r}")
 
+        # --------------------------------------------- logo links to GitHub
+        href = page.locator(".logo").get_attribute("href") or ""
+        check("intake logo links to GitHub", "github.com/Vaidehi1645" in href,
+              href or "no href")
+
         # --------------------------------------------- build (palmonas reuse: instant, free)
         page.fill("#url", "https://palmonas.com/")
         page.click("#go")
