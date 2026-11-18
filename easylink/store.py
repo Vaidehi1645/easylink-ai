@@ -314,6 +314,15 @@ class Database:
                 return row
         return None
 
+    def page_titles(self, site_id: str, limit: int = 20) -> list[str]:
+        """Titles of this site's pages (what a crawl 'learned'), for the
+        ingest done event — the visitor sees exactly what the bot knows."""
+        rows = self._rows(
+            "SELECT title FROM pages WHERE site_id=? ORDER BY rowid LIMIT ?",
+            (site_id, limit),
+        )
+        return [r["title"] for r in rows if r["title"]]
+
     def get_site_by_slug(self, slug: str) -> sqlite3.Row | None:
         if not slug or len(slug) > 80:
             return None

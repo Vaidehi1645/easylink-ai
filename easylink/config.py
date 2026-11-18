@@ -65,6 +65,7 @@ class Settings:
     max_depth: int = 4
     page_timeout: float = 15.0
     politeness_delay: float = 0.25  # seconds between requests to same host
+    sitemap_limit: int = 500        # max URLs taken from sitemap.xml
     user_agent: str = "EasyLinkAI-Crawler/1.0 (+https://easylink.ai/bot)"
 
     # --- chunking ---

@@ -67,10 +67,14 @@
   }
   .feed .dim { color: #6b7194; }
   .feed .head { color: #8ea2ff; }
+  .feed .warn { color: #e11d48; }
 
   .result { margin-top: 16px; border: 1.5px dashed #c9cef5; border-radius: 14px; padding: 15px 16px; background: #fafaff; }
   .result h3 { margin: 0 0 12px; font-size: 15.5px; color: #065f46; }
   .result label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #6b7194; margin: 10px 0 5px; }
+  .learned { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: #374151; max-height: 132px; overflow: auto; }
+  .learned li { margin: 3px 0; }
+  .learned li.more { list-style: none; margin-left: -18px; color: #6b7194; font-style: italic; }
   .copyrow { display: flex; gap: 8px; }
   .copyrow input {
     flex: 1; min-width: 0; padding: 9px 11px; font-size: 13.5px; border: 1px solid #d8dbe7;
@@ -139,6 +143,10 @@
         <button id="copysnip" type="button">Copy</button>
       </div>
       <a class="open" id="open" href="#" target="_blank" rel="noopener">Open my bot ↗</a>
+      <div id="learnedwrap" hidden>
+        <label>What your bot learned</label>
+        <ul class="learned" id="learned"></ul>
+      </div>
     </div>
   </section>
 
@@ -162,6 +170,8 @@
   var linkIn = document.getElementById("link");
   var snipIn = document.getElementById("snippet");
   var openA = document.getElementById("open");
+  var learnedWrap = document.getElementById("learnedwrap");
+  var learnedList = document.getElementById("learned");
 
   function say(html, cls) {
     greet.className = "bubble" + (cls ? " " + cls : "");
@@ -202,6 +212,10 @@
       line("On it — crawling now, you'll see every page I touch…", "dim");
     } else if (ev.type === "reuse") {
       line("♻️  I already know this site — reusing the last crawl (instant, free)", "dim");
+    } else if (ev.type === "note") {
+      line(ev.text, "dim");
+    } else if (ev.type === "warn") {
+      line("⚠ " + ev.text, "warn");
     } else if (ev.type === "fetch") {
       line("→ " + ev.url + (ev.status ? "   (" + ev.status + ")" : "   (failed)"));
     } else if (ev.type === "log") {
@@ -209,10 +223,25 @@
     } else if (ev.type === "index") {
       line("⚙️  " + ev.text, "dim");
     } else if (ev.type === "done") {
-      line("✅ done — " + ev.pages + " pages, " + ev.chunks + " chunks indexed", "head");
+      var timing = ev.reused ? " (instant)" : (typeof ev.seconds === "number" ? " in " + ev.seconds + "s" : "");
+      line("✅ done — " + ev.pages + " pages, " + ev.chunks + " chunks indexed" + timing, "head");
       linkIn.value = ev.link;
       snipIn.value = ev.snippet;
       openA.href = ev.link;
+      var learned = ev.learned || [];
+      learnedList.innerHTML = "";
+      learned.slice(0, 8).forEach(function (t) {
+        var li = document.createElement("li");
+        li.textContent = t;
+        learnedList.appendChild(li);
+      });
+      if (learned.length > 8) {
+        var more = document.createElement("li");
+        more.className = "more";
+        more.textContent = "…+" + (learned.length - 8) + " more pages";
+        learnedList.appendChild(more);
+      }
+      learnedWrap.hidden = learned.length === 0;
       result.hidden = false;
       say("Done! Your bot for <b>" + ev.site + "</b> is ready — grab the link below 👇", "yay");
     } else if (ev.type === "error") {

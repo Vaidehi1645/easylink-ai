@@ -200,6 +200,10 @@ def main() -> int:
           link[:80])
     check("reuse flagged (reused=true)", done.get("reused") is True,
           str(done.get("reused")))
+    check("done carries what the bot learned + timing",
+          isinstance(done.get("learned"), list) and len(done.get("learned", [])) >= 1
+          and isinstance(done.get("seconds"), (int, float)),
+          f"learned={done.get('learned')} seconds={done.get('seconds')}")
 
     # ------------------------------------------- the demo link itself
     token_m = re.search(r'data-site="([0-9a-f]+)"', snippet)

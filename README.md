@@ -118,7 +118,7 @@ python tests\test_phase2_api.py            # API + security (13 checks)
 python tests\test_phase2_api.py --flood    # rate limiting (run last)
 python tests\test_phase2_api.py --quota    # daily quota (spawns its own server)
 python tests\test_phase2_widget.py         # headless-browser widget test (13 checks)
-python tests\test_phase6_ingest.py         # self-serve intake + SSRF + quota (23 checks)
+python tests\test_phase6_ingest.py         # self-serve intake + SSRF + quota (24 checks)
 ```
 
 ### Inside chat
@@ -142,13 +142,29 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 ```
 
 - **`POST /ingest`** streams the crawl as SSE: `start` → `fetch` (every
-  page + status) → `index` → `done`/`error`.
+  page + status) → `log`/`warn` → `index` → `done`/`error`.
 - **Guards:** http(s) only · **SSRF blocked** (only publicly routable
   addresses are ever fetched — every redirect hop re-checked via
   `GuardedSession`) · **10 crawls/day/IP** (`EASYLINK_CRAWL_DAILY`) ·
   **20 pages max** per crawl · robots.txt + politeness delays (built in).
+- **Speed budgets:** every ingest crawl is bounded — **22 s wall clock**
+  (`INGEST_MAX_SECONDS`), **60 fetch attempts** (`INGEST_MAX_FETCHES`),
+  8 s per page, 0.1 s politeness, sitemap capped at 100 URLs. Whatever is
+  collected by the deadline gets indexed: a pasted link answers in
+  seconds, never minutes (a live palmonas.com crawl runs ~9 s).
+- **Double-paste safe:** pasting a link *while it is still crawling* joins
+  the run in progress — one crawl, every visitor gets the same feed and
+  demo link, only the first visitor spends quota.
 - **Reuse:** the same host is crawled once — re-pasting it returns the
   same link instantly and spends nothing (no fetches, no embeddings).
+- **JS-heavy sites stay answerable:** stores that render their body with
+  JavaScript are indexed from what the server *does* send — meta
+  description / og:description / JSON-LD summaries plus the site's own
+  link text (product tiles fall back to their URL-slug labels), with an
+  honest warning when most fetches came back empty.
+- **`done` carries `learned`** — the page titles the bot actually knows —
+  plus crawl `seconds`; the intake UI lists them under "What your bot
+  learned".
 - `GET /demo/<slug>` serves the demo page; slugs are domain-derived and
   stable (`jewelsmars.com` → `/demo/jewelsmars`, `…-2` on collision).
 

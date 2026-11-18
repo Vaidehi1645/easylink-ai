@@ -106,7 +106,7 @@ class FakeSession:
         return FakeResp(url, "", 404)
 
 
-def run_crawl(pages: dict[str, str], start: str, max_pages: int) -> tuple[list[str], object]:
+def run_crawl(pages: dict[str, str], start: str, max_pages: int, **kw) -> tuple[list[str], object]:
     """Crawl the fake site offline; return (content fetches in order, result)."""
     made: list[FakeSession] = []
 
@@ -121,7 +121,7 @@ def run_crawl(pages: dict[str, str], start: str, max_pages: int) -> tuple[list[s
         settings = Settings(
             max_pages=max_pages, max_depth=3, politeness_delay=0.0, page_timeout=5.0
         )
-        result = crawl(start, settings, log=lambda *a, **k: None)
+        result = crawl(start, settings, log=lambda *a, **k: None, **kw)
     finally:
         crawler.requests.Session = original
     order = [u for u in made[0].fetched if not u.endswith(("robots.txt", "sitemap.xml"))]
@@ -243,6 +243,148 @@ check(
 check(
     "chrome still reachable when cheaper tiers drain (no starvation)",
     f"{BASE}/features" in home_order,
+)
+
+# --------------------------------------------------------------------------- #
+print("\n===== policy pages demoted to last tier =====")
+
+check(
+    "policy paths demoted to tier 2 (fetched only when budget remains)",
+    link_tier(f"{BASE}/pages/privacy-policy", "/", False) == 2
+    and link_tier(f"{BASE}/pages/terms-of-service", "/", False) == 2
+    and link_tier(f"{BASE}/policies/refund-policy", "/", False) == 2,
+)
+check(
+    "normal content NOT demoted (products/about stay tier 1)",
+    link_tier(f"{BASE}/collections/rings", "/", False) == 1
+    and link_tier(f"{BASE}/about", "/", False) == 1,
+)
+check(
+    "is_low_value: shipping/warranty demoted, product pages not",
+    crawler.is_low_value(f"{BASE}/pages/shipping-policy")
+    and crawler.is_low_value(f"{BASE}/warranty")
+    and not crawler.is_low_value(f"{BASE}/collections/necklaces"),
+)
+
+# --------------------------------------------------------------------------- #
+print("\n===== crawl budgets: wall clock + fetch attempts =====")
+
+order, result = run_crawl(profile_pages, f"{BASE}/vaidehi", max_pages=10, max_fetches=3)
+check(
+    "fetch budget caps content attempts at exactly 3",
+    len(order) == 3,
+    f"fetches={len(order)}",
+)
+check(
+    "crawl still returns what it collected under budget",
+    1 <= len(result.pages) <= 3,
+    f"pages={len(result.pages)}",
+)
+
+order, result = run_crawl(profile_pages, f"{BASE}/vaidehi", max_pages=10, max_seconds=0.0)
+check(
+    "wall-clock budget of 0s stops before any content fetch",
+    order == [] and result.pages == [],
+    f"fetches={len(order)}",
+)
+
+# --------------------------------------------------------------------------- #
+print("\n===== JS-heavy pages: stub rescue + seed guarantee =====")
+
+THIN_PRODUCT = """
+<html><head>
+<title>Glow Ring — Palmonas</title>
+<meta name="description" content="Handcrafted glow ring in sterling silver with a soft inner glow. Ships across India in 3-5 days.">
+</head><body><div id="app"></div></body></html>
+"""
+
+THIN_EMPTY = """
+<html><head><title>Boring Page</title></head><body><div id="app"></div></body></html>
+"""
+
+THIN_LINKS = """
+<html><head><title>Shop</title></head><body>
+<div id="app">
+  <a href="/p/solitaire-ring">18k Solitaire Ring</a>
+  <a href="/p/heart-ring">Heart Promise Ring</a>
+</div></body></html>
+"""
+
+THIN_TILES = """
+<html><head><title>Store</title></head><body>
+<div id="app">
+  <a href="/products/mini-solitaire-ring-13689"><img src="x.jpg"></a>
+  <a href="/products/love-hug-ring-18k-gold-plated-81409"><img src="y.jpg"></a>
+</div></body></html>
+"""
+
+
+def store_home(*links: str) -> str:
+    items = "".join(f"<a href='{l}'>{l}</a>" for l in links)
+    body = "Store home content for the extractor. " * 10
+    return f"<html><head><title>Store</title></head><body><main><p>{body}</p>{items}</main></body></html>"
+
+
+js_pages = {
+    f"{BASE}/": store_home("/products/glow-ring", "/products/boring"),
+    f"{BASE}/products/glow-ring": THIN_PRODUCT,
+    f"{BASE}/products/boring": THIN_EMPTY,
+}
+_, result = run_crawl(js_pages, f"{BASE}/", max_pages=5)
+by_url = {p.url: p for p in result.pages}
+check(
+    "thin product page rescued via its meta description",
+    f"{BASE}/products/glow-ring" in by_url
+    and "sterling silver" in by_url[f"{BASE}/products/glow-ring"].text,
+    f"pages={len(result.pages)}",
+)
+check(
+    "rescued page carries its title (identity for retrieval)",
+    f"{BASE}/products/glow-ring" in by_url
+    and "Glow Ring" in by_url[f"{BASE}/products/glow-ring"].text,
+)
+check(
+    "thin page with no metadata still rejected (no junk indexed)",
+    f"{BASE}/products/boring" not in by_url and result.skipped_thin == 1,
+    f"skipped_thin={result.skipped_thin}",
+)
+
+_, result = run_crawl({f"{BASE}/shop": THIN_LINKS}, f"{BASE}/shop", max_pages=3)
+check(
+    "thin page with no metadata rescued via its link text (product names)",
+    len(result.pages) == 1 and "Solitaire Ring" in result.pages[0].text
+    and "Heart Promise Ring" in result.pages[0].text,
+    f"pages={len(result.pages)}",
+)
+
+_, result = run_crawl({f"{BASE}/tiles": THIN_TILES}, f"{BASE}/tiles", max_pages=3)
+check(
+    "empty image tiles rescued via URL slug labels (id stripped)",
+    len(result.pages) == 1
+    and "mini solitaire ring" in result.pages[0].text
+    and "love hug ring 18k gold plated" in result.pages[0].text
+    and "13689" not in result.pages[0].text,
+    result.pages[0].text[:110] if result.pages else "no pages",
+)
+
+_, result = run_crawl({f"{BASE}/": THIN_EMPTY}, f"{BASE}/", max_pages=3)
+check(
+    "seed with zero extractable text still earns a line (title)",
+    len(result.pages) == 1 and "Boring" in result.pages[0].text,
+    f"pages={len(result.pages)}",
+)
+
+stub = crawler.extract_stub(
+    "<html><head>"
+    "<meta property='og:description' content='Luxury rings that ship across India in 3 days.'>"
+    '<script type="application/ld+json">{"@context": "https://schema.org", '
+    '"name": "Palmonas", "description": "A jewelry store selling handcrafted silver pieces."}'
+    "</script></head><body></body></html>"
+)
+check(
+    "extract_stub pulls og:description + JSON-LD, skips bare URLs/names",
+    "Luxury rings" in stub and "jewelry store" in stub and "schema.org" not in stub,
+    stub[:90],
 )
 
 # --------------------------------------------------------------------------- #

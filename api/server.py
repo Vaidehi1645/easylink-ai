@@ -15,6 +15,7 @@ import dataclasses
 import json
 import queue
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -41,8 +42,18 @@ STATIC = Path(__file__).parent / "static"
 
 # Self-serve crawls are deliberately small: enough for a useful bot,
 # small enough that one IP can't soak the server or the OpenAI bill.
+# Wall-clock + attempt budgets keep a pasted link answered in well under a
+# minute — a huge frontier must not drain for 9 minutes (palmonas.com did).
 INGEST_MAX_PAGES = 20
+INGEST_MAX_SECONDS = 22.0
+INGEST_MAX_FETCHES = 60
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+# One crawl per host: a visitor who pastes the same link WHILE it is
+# crawling JOINS that run (each visitor gets the same feed and demo link;
+# only the starter spends quota). Guards the natural double-paste reflex.
+_jobs: dict[str, list[queue.Queue]] = {}
+_jobs_lock = threading.Lock()
 
 app = FastAPI(title="EasyLink AI API", version="0.3.0")
 
@@ -248,9 +259,9 @@ async def ingest(request: Request):
     site_name = host[4:] if host.startswith("www.") else host
     ip = request.client.host if request.client else "unknown"
 
-    def done_payload(site_row, slug: str, reused: bool) -> dict:
+    def done_payload(site_row, slug: str, reused: bool, extra: dict | None = None) -> dict:
         token = db.get_or_create_token(site_row["id"])
-        return {
+        payload = {
             "type": "done",
             "link": f"{origin}/demo/{slug}",
             "snippet": f'<script src="{origin}/widget.js" data-site="{token}"></script>',
@@ -259,42 +270,95 @@ async def ingest(request: Request):
             "chunks": int(site_row["chunk_count"] or 0),
             "reused": reused,
         }
+        if extra:
+            payload.update(extra)
+        return payload
 
-    # --- reuse: this host is already crawled -> free + instant (no quota) ---
-    existing = db.find_site_by_host(host)
+    # Decide under one lock:
+    #   JOIN  — this host is being crawled right now (double-paste): share
+    #           the running crawl, no second fetch, no second quota spend;
+    #   REUSE — this host is already crawled: free + instant;
+    #   START — new crawl: the only path that spends quota, and only the
+    #           first visitor for this host spends it.
+    joining = False
+    existing = None
+    events: queue.Queue | None = None
+    with _jobs_lock:
+        if host in _jobs:
+            events = queue.Queue()
+            _jobs[host].append(events)
+            joining = True
+        else:
+            existing = db.find_site_by_host(host)
+            if existing is None:
+                verdict = guard.check_crawl(ip)
+                if verdict:
+                    code, msg = verdict
+                    return JSONResponse({"error": msg}, status_code=code)
+                events = queue.Queue()
+                _jobs[host] = [events]
+
     if existing is not None:
         def reuse_stream():
             yield _sse({"type": "start", "url": url})
             yield _sse({"type": "reuse", "site": existing["name"]})
-            yield _sse(done_payload(existing, db.ensure_slug(existing["id"]), True))
+            yield _sse(
+                done_payload(
+                    existing,
+                    db.ensure_slug(existing["id"]),
+                    True,
+                    extra={"learned": db.page_titles(existing["id"]), "seconds": 0.0},
+                )
+            )
 
         return StreamingResponse(reuse_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
-    # --- new crawl: quota is spent only here ---
-    verdict = guard.check_crawl(ip)
-    if verdict:
-        code, msg = verdict
-        return JSONResponse({"error": msg}, status_code=code)
+    crawl_settings = dataclasses.replace(
+        settings,
+        max_pages=INGEST_MAX_PAGES,
+        max_depth=3,
+        page_timeout=8.0,
+        politeness_delay=0.1,
+        sitemap_limit=100,
+    )
 
-    crawl_settings = dataclasses.replace(settings, max_pages=INGEST_MAX_PAGES)
-    events: queue.Queue = queue.Queue()
+    def publish(ev: dict) -> None:
+        with _jobs_lock:
+            for sub in _jobs.get(host, []):
+                sub.put(ev)
 
-    def emit(ev: dict) -> None:
-        events.put(ev)
+    def close_job() -> None:
+        with _jobs_lock:
+            for sub in _jobs.get(host, []):
+                sub.put(None)  # poison pill: every stream ends
+            _jobs.pop(host, None)
 
     def job() -> None:
+        t0 = time.monotonic()
         try:
             def log(msg):
-                emit({"type": "log", "text": str(msg)})
+                publish({"type": "log", "text": str(msg)})
 
             def on_fetch(fetched: str, status):
-                emit({"type": "fetch", "url": fetched[:160], "status": status})
+                publish({"type": "fetch", "url": fetched[:160], "status": status})
 
-            result = crawl(url, crawl_settings, log=log, safe=True, on_fetch=on_fetch)
+            result = crawl(
+                url,
+                crawl_settings,
+                log=log,
+                safe=True,
+                on_fetch=on_fetch,
+                max_seconds=INGEST_MAX_SECONDS,
+                max_fetches=INGEST_MAX_FETCHES,
+            )
             if not result.pages:
-                emit({"type": "error", "message": "that site blocked us or had no readable content — try another link"})
+                publish({"type": "error", "message": "that site blocked us or had no readable content — try another link"})
                 return
-            emit({"type": "index", "text": f"indexing {len(result.pages)} pages — teaching your bot…"})
+            # Honest heads-up: when most fetches came back with no readable
+            # text, the site renders via JavaScript and answers will be thin.
+            if result.skipped_thin >= 5 and result.skipped_thin > len(result.pages):
+                publish({"type": "warn", "message": "this site renders most of its content with JavaScript — the bot learned only what the site's HTML provides, so answers may be limited"})
+            publish({"type": "index", "text": f"indexing {len(result.pages)} pages — teaching your bot…"})
 
             site_id = db.create_site(url, site_name)
             pages_n, chunks_n = index_pages(
@@ -303,20 +367,33 @@ async def ingest(request: Request):
             db.update_site_counts(site_id, pages_n, chunks_n)
             slug = db.ensure_slug(site_id)
             row = db.get_site(site_id)
-            emit(done_payload(row, slug, False))
+            publish(
+                done_payload(
+                    row,
+                    slug,
+                    False,
+                    extra={
+                        "learned": [p.title for p in result.pages if p.title][:20],
+                        "seconds": round(time.monotonic() - t0, 1),
+                    },
+                )
+            )
         except ValueError as exc:
-            emit({"type": "error", "message": str(exc)})
+            publish({"type": "error", "message": str(exc)})
         except ProviderError:
-            emit({"type": "error", "message": "indexing failed — the server's AI key may be missing"})
+            publish({"type": "error", "message": "indexing failed — the server's AI key may be missing"})
         except Exception:
             # never leak internals to the visitor
-            emit({"type": "error", "message": "something went wrong while crawling — try another link"})
+            publish({"type": "error", "message": "something went wrong while crawling — try another link"})
         finally:
-            events.put(None)  # poison pill: stream ends
+            close_job()
 
     def stream():
-        threading.Thread(target=job, daemon=True).start()
+        if not joining:
+            threading.Thread(target=job, daemon=True).start()
         yield _sse({"type": "start", "url": url})
+        if joining:
+            yield _sse({"type": "note", "text": "already crawling this site — joining that run…"})
         while True:
             ev = events.get()
             if ev is None:
