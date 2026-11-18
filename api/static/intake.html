@@ -71,6 +71,7 @@
 
   .result { margin-top: 16px; border: 1.5px dashed #c9cef5; border-radius: 14px; padding: 15px 16px; background: #fafaff; }
   .result h3 { margin: 0 0 12px; font-size: 15.5px; color: #065f46; }
+  .limited { margin: -4px 0 10px; font-size: 12.5px; line-height: 1.5; color: #9f1239; background: #fff1f2; border: 1px solid #ffd7dd; border-radius: 10px; padding: 8px 10px; }
   .result label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #6b7194; margin: 10px 0 5px; }
   .learned { margin: 0; padding: 0 0 0 18px; font-size: 13px; color: #374151; max-height: 132px; overflow: auto; }
   .learned li { margin: 3px 0; }
@@ -132,6 +133,7 @@
 
     <div class="result" id="result" hidden>
       <h3>✅ Your bot is ready!</h3>
+      <div class="limited" id="limited" hidden></div>
       <label>Demo link — anyone can open it and chat</label>
       <div class="copyrow">
         <input id="link" readonly>
@@ -172,6 +174,7 @@
   var openA = document.getElementById("open");
   var learnedWrap = document.getElementById("learnedwrap");
   var learnedList = document.getElementById("learned");
+  var limited = document.getElementById("limited");
 
   function say(html, cls) {
     greet.className = "bubble" + (cls ? " " + cls : "");
@@ -242,6 +245,12 @@
         learnedList.appendChild(more);
       }
       learnedWrap.hidden = learned.length === 0;
+      if (ev.warn) {
+        limited.textContent = "⚠ " + ev.warn;
+        limited.hidden = false;
+      } else {
+        limited.hidden = true;
+      }
       result.hidden = false;
       say("Done! Your bot for <b>" + ev.site + "</b> is ready — grab the link below 👇", "yay");
     } else if (ev.type === "error") {

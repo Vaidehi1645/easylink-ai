@@ -165,6 +165,12 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 - **`done` carries `learned`** — the page titles the bot actually knows —
   plus crawl `seconds`; the intake UI lists them under "What your bot
   learned".
+- **Bot-hostile sites say so out loud:** when most requests come back
+  blocked (Amazon-class walls), the feed warns, `done` carries `warn` +
+  `blocked`, the intake shows a persistent "answers will be limited"
+  badge, and the demo page states how many pages it was built from — so
+  "I don't have information" reads as the site's refusal, not a storage
+  bug. Reopening a ≤4-page site repeats the warning.
 - `GET /demo/<slug>` serves the demo page; slugs are domain-derived and
   stable (`jewelsmars.com` → `/demo/jewelsmars`, `…-2` on collision).
 

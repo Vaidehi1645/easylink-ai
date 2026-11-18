@@ -422,6 +422,31 @@ class CrawlResult:
     errors: int = 0
 
 
+def crawl_warning(pages: int, blocked: int, thin: int) -> str | None:
+    """Honest heads-up when the SITE fought the crawl.
+
+    A bot-hostile store (Amazon-class) answers most requests with 403/503;
+    we index the handful of pages that got through and the bot then honestly
+    replies "I don't have information". Without saying so out loud, the owner
+    reads that as a storage bug ("what it crawled should be stored!").
+    Returns None for a healthy crawl — no noise.
+    """
+    if pages <= 0:
+        return None  # caller raises the hard "no readable content" error
+    if blocked >= 5 and blocked > pages:
+        return (
+            f"this site blocked {blocked} of our requests — it limits automated "
+            f"visitors, so only {pages} page{'s' if pages != 1 else ''} were "
+            "readable and this bot will know very little"
+        )
+    if thin >= 5 and thin > pages:
+        return (
+            "this site renders most of its content with JavaScript — the bot "
+            "learned only what the site's HTML provides, so answers may be limited"
+        )
+    return None
+
+
 def crawl(
     start_url: str,
     settings: Settings,

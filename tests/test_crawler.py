@@ -289,6 +289,30 @@ check(
 )
 
 # --------------------------------------------------------------------------- #
+print("\n===== crawl warnings: blocked/thin sites say so loudly =====")
+
+check(
+    "blocked-heavy crawl warns (Amazon-class wall)",
+    "blocked" in (crawler.crawl_warning(pages=4, blocked=17, thin=2) or ""),
+)
+check(
+    "thin-heavy crawl warns (JS-heavy site)",
+    "JavaScript" in (crawler.crawl_warning(pages=8, blocked=1, thin=40) or ""),
+)
+check(
+    "healthy crawl stays quiet (no false alarm)",
+    crawler.crawl_warning(pages=19, blocked=1, thin=0) is None,
+)
+check(
+    "small-but-unfought site stays quiet",
+    crawler.crawl_warning(pages=8, blocked=2, thin=3) is None,
+)
+check(
+    "zero pages -> caller raises the hard error, no warn",
+    crawler.crawl_warning(pages=0, blocked=30, thin=0) is None,
+)
+
+# --------------------------------------------------------------------------- #
 print("\n===== JS-heavy pages: stub rescue + seed guarantee =====")
 
 THIN_PRODUCT = """

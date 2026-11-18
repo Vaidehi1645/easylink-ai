@@ -204,6 +204,10 @@ def main() -> int:
           isinstance(done.get("learned"), list) and len(done.get("learned", [])) >= 1
           and isinstance(done.get("seconds"), (int, float)),
           f"learned={done.get('learned')} seconds={done.get('seconds')}")
+    check("done carries warn field for the honest UI (str or null)",
+          "warn" in done and (done.get("warn") is None
+                              or isinstance(done.get("warn"), str)),
+          str(done.get("warn")))
 
     # ------------------------------------------- the demo link itself
     token_m = re.search(r'data-site="([0-9a-f]+)"', snippet)

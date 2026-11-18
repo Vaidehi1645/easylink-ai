@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from api.security import Guard
 from easylink.config import load_settings
-from easylink.crawler import crawl, fetch_verdict
+from easylink.crawler import crawl, crawl_warning, fetch_verdict
 from easylink.gaps import record_gap
 from easylink.indexer import index_pages
 from easylink.providers import ProviderError, get_provider
@@ -98,7 +98,17 @@ def _demo_html(site) -> str:
     """The demo page (test.html) wired to a specific site's widget token."""
     real_token = db.get_or_create_token(site["id"])
     html = (STATIC / "test.html").read_text(encoding="utf-8")
-    return html.replace("__TOKEN__", real_token).replace("__SITE__", site["name"])
+    # Say how much the bot actually knows — a4-page bot built from an
+    # Amazon-class wall must not present itself as a full-fledged one.
+    pages = int(site["page_count"] or 0)
+    note = f"Built from {pages} page{'s' if pages != 1 else ''} of {site['name']}"
+    if 0 < pages <= 4:
+        note += " — this site shares very little of its content, so answers will be limited"
+    return (
+        html.replace("__TOKEN__", real_token)
+        .replace("__SITE__", site["name"])
+        .replace("__NOTE__", note)
+    )
 
 
 # ---------------------------------------------------------------- CORS ----
@@ -299,15 +309,31 @@ async def ingest(request: Request):
                 _jobs[host] = [events]
 
     if existing is not None:
+        # A4-page crawl (Amazon-class wall) must not present itself as a
+        # healthy bot on re-open — carry the same honesty as a fresh warn.
+        rpages = int(existing["page_count"] or 0)
+        reuse_warn = (
+            f"this site only ever gave us {rpages} page"
+            f"{'s' if rpages != 1 else ''} — answers will be limited"
+            if 0 < rpages <= 4
+            else None
+        )
+
         def reuse_stream():
             yield _sse({"type": "start", "url": url})
             yield _sse({"type": "reuse", "site": existing["name"]})
+            if reuse_warn:
+                yield _sse({"type": "warn", "message": reuse_warn})
             yield _sse(
                 done_payload(
                     existing,
                     db.ensure_slug(existing["id"]),
                     True,
-                    extra={"learned": db.page_titles(existing["id"]), "seconds": 0.0},
+                    extra={
+                        "learned": db.page_titles(existing["id"]),
+                        "seconds": 0.0,
+                        "warn": reuse_warn,
+                    },
                 )
             )
 
@@ -354,10 +380,14 @@ async def ingest(request: Request):
             if not result.pages:
                 publish({"type": "error", "message": "that site blocked us or had no readable content — try another link"})
                 return
-            # Honest heads-up: when most fetches came back with no readable
-            # text, the site renders via JavaScript and answers will be thin.
-            if result.skipped_thin >= 5 and result.skipped_thin > len(result.pages):
-                publish({"type": "warn", "message": "this site renders most of its content with JavaScript — the bot learned only what the site's HTML provides, so answers may be limited"})
+            # Honest heads-up when the SITE fought the crawl (blocked-heavy)
+            # or serves its body via JavaScript (thin-heavy): say it out loud
+            # so "I don't know" in chat reads as the site's refusal, not a bug.
+            warn = crawl_warning(
+                len(result.pages), result.skipped_blocked, result.skipped_thin
+            )
+            if warn:
+                publish({"type": "warn", "message": warn})
             publish({"type": "index", "text": f"indexing {len(result.pages)} pages — teaching your bot…"})
 
             site_id = db.create_site(url, site_name)
@@ -375,6 +405,8 @@ async def ingest(request: Request):
                     extra={
                         "learned": [p.title for p in result.pages if p.title][:20],
                         "seconds": round(time.monotonic() - t0, 1),
+                        "warn": warn,
+                        "blocked": result.skipped_blocked,
                     },
                 )
             )
