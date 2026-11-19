@@ -149,9 +149,9 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 - **Guards:** http(s) only · **SSRF blocked** (only publicly routable
   addresses are ever fetched — every redirect hop re-checked via
   `GuardedSession`) · **10 crawls/day/IP** (`EASYLINK_CRAWL_DAILY`) ·
-  **20 pages max** per crawl · robots.txt + politeness delays (built in).
-- **Speed budgets:** every ingest crawl is bounded — **22 s wall clock**
-  (`INGEST_MAX_SECONDS`), **60 fetch attempts** (`INGEST_MAX_FETCHES`),
+  **30 pages max** per crawl · robots.txt + politeness delays (built in).
+- **Speed budgets:** every ingest crawl is bounded — **35 s wall clock**
+  (`INGEST_MAX_SECONDS`), **90 fetch attempts** (`INGEST_MAX_FETCHES`),
   8 s per page, 0.1 s politeness, sitemap capped at 100 URLs. Whatever is
   collected by the deadline gets indexed: a pasted link answers in
   seconds, never minutes (a live palmonas.com crawl runs ~9 s).

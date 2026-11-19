@@ -47,6 +47,67 @@ def is_refusal(text: str) -> bool:
     return bool(_REFUSAL_RE.search(text))
 
 
+def site_note(row) -> str:
+    """Why the bot is silent — the SITE's limits, said out loud.
+
+    A bare "I don't know" on a single-page or bot-walled site reads as a
+    storage bug and the owner gets blamed for the site's own walls. Returns
+    '' for healthy crawls (no noise); `row` may be a sqlite3.Row, a dict or
+    None (facts-off engines) — anything unexpected just stays quiet.
+    """
+    if row is None:
+        return ""
+    try:
+        pages = int(row["page_count"] or 0)
+        blocked = int(row["blocked"] or 0)
+        thin = int(row["thin"] or 0)
+    except (KeyError, IndexError, TypeError, ValueError):
+        return ""
+    if pages <= 0:
+        return ""  # never indexed — nothing to explain
+    if blocked >= 5 and blocked > pages:
+        return (
+            f"this site blocked {blocked} of our requests — it limits "
+            f"automated visitors, so I only learned from the {pages} page"
+            f"{'s' if pages != 1 else ''} it let through"
+        )
+    if thin >= 5 and thin > pages:
+        return (
+            "this site renders most of its content with JavaScript — I only "
+            "learned what its plain HTML provides"
+        )
+    if pages == 1:
+        return (
+            "this site has only one page — everything I know comes from it, "
+            "so this question goes beyond what the site says"
+        )
+    return ""
+
+
+def reality_abstain(row) -> str:
+    """Layer-1 abstention: the SITE's reality leads, ABSTAIN_TEXT follows.
+
+    Healthy sites keep the exact ABSTAIN_TEXT (tests and widgets pin the
+    wording); limited sites tell the truth first, then the contact line.
+    """
+    note = site_note(row)
+    if not note:
+        return ABSTAIN_TEXT
+    return note[0].upper() + note[1:] + ". " + ABSTAIN_TEXT
+
+
+def reality_suffix(text: str, row) -> str:
+    """A model refusal plus the site's reality — appended, stream-safe.
+
+    The refusal text was already streamed as deltas, so the note rides
+    along after it (identical wording in answer() and stream_answer()).
+    """
+    note = site_note(row)
+    if not note:
+        return text
+    return text + " " + note[0].upper() + note[1:] + "."
+
+
 # --- citations that actually relate to the reply ------------------------ #
 # A source link is only useful if it takes the visitor to something the
 # ANSWER talked about: links unrelated to the reply (or links under a bare
@@ -313,6 +374,15 @@ class RAGEngine:
     def _facts(self, site_id: str, embedding) -> list[dict]:
         return load_facts(self.db, site_id, embedding)
 
+    def _row(self, site_id: str):
+        """Site row for the abstention's reality note (never raises)."""
+        if self.db is None or not site_id:
+            return None
+        try:
+            return self.db.get_site(site_id)
+        except Exception:
+            return None
+
     def answer(self, question: str, site_id: str, history: list[dict] | None = None) -> Answer:
         clock = clock_answer(question)
         if clock:
@@ -322,9 +392,11 @@ class RAGEngine:
         facts = self._facts(site_id, embedding)
 
         # Layer 1 + layer 8: no page context AND no owner fact -> abstain.
+        # The refusal names the SITE's limits when that's why we're blind
+        # (bot-wall / single page / JS-only) — never a bare "I don't know".
         if not ok and not facts:
             return Answer(
-                text=ABSTAIN_TEXT,
+                text=reality_abstain(self._row(site_id)),
                 sources=[],
                 scores=[],
                 abstained=True,
@@ -338,7 +410,10 @@ class RAGEngine:
         # unrelated links on the visitor).
         if not text:
             return Answer(
-                ABSTAIN_TEXT, sources=[], abstained=True, question=question
+                reality_abstain(self._row(site_id)),
+                sources=[],
+                abstained=True,
+                question=question,
             )
 
         # Layer 2 held: the model refused from lack of context -> gap anyway
@@ -366,6 +441,11 @@ class RAGEngine:
             )
             if top:
                 sources = [top]
+
+        # The refusal tells the SITE's limits too — appended after the
+        # model's own words (stream_answer() yields the same suffix).
+        if abstained:
+            text = reality_suffix(text, self._row(site_id))
 
         return Answer(
             text=text,
@@ -396,8 +476,9 @@ class RAGEngine:
         facts = self._facts(site_id, embedding)
 
         if not ok and not facts:
-            yield {"delta": ABSTAIN_TEXT}
-            yield {"answer": Answer(ABSTAIN_TEXT, abstained=True, question=question)}
+            text = reality_abstain(self._row(site_id))
+            yield {"delta": text}
+            yield {"answer": Answer(text, abstained=True, question=question)}
             return
 
         user_prompt = build_user_prompt(question, hits, facts)
@@ -412,7 +493,10 @@ class RAGEngine:
         if not text:
             yield {
                 "answer": Answer(
-                    ABSTAIN_TEXT, sources=[], abstained=True, question=question
+                    reality_abstain(self._row(site_id)),
+                    sources=[],
+                    abstained=True,
+                    question=question,
                 )
             }
             return
@@ -429,6 +513,14 @@ class RAGEngine:
             )
             if top:
                 sources = [top]
+
+        # Same reality suffix as answer(): the model's refusal already
+        # streamed, so the site's limits ride along as one extra delta.
+        if abstained:
+            full = reality_suffix(text, self._row(site_id))
+            if full != text:
+                yield {"delta": full[len(text):]}
+                text = full
 
         yield {
             "answer": Answer(

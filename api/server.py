@@ -17,6 +17,7 @@ import json
 import queue
 import threading
 import time
+import traceback
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -53,9 +54,9 @@ STATIC = Path(__file__).parent / "static"
 # small enough that one IP can't soak the server or the OpenAI bill.
 # Wall-clock + attempt budgets keep a pasted link answered in well under a
 # minute — a huge frontier must not drain for 9 minutes (palmonas.com did).
-INGEST_MAX_PAGES = 20
-INGEST_MAX_SECONDS = 22.0
-INGEST_MAX_FETCHES = 60
+INGEST_MAX_PAGES = 30
+INGEST_MAX_SECONDS = 35.0
+INGEST_MAX_FETCHES = 90
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 # One crawl per host: a visitor who pastes the same link WHILE it is
@@ -210,7 +211,11 @@ async def chat(request: Request):
         except ProviderError as exc:
             yield "data: " + json.dumps({"error": str(exc)}) + "\n\n"
         except Exception:
-            # never leak internals to the embedder
+            # never leak internals to the embedder — but the SERVER must
+            # see the real traceback, else every stream failure is silent.
+            print(f"[chat] FAILED for site={site['id']!r} q={question[:80]!r}",
+                  flush=True)
+            traceback.print_exc()
             yield "data: " + json.dumps({"error": "assistant error — please retry"}) + "\n\n"
 
     return StreamingResponse(
@@ -592,6 +597,11 @@ async def ingest(request: Request):
                 site_id, result.pages, provider, db, vectors, crawl_settings, log=log
             )
             db.update_site_counts(site_id, pages_n, chunks_n)
+            # Remember what FIGHTED the crawl (bot walls, JS-only bodies) so
+            # chat abstentions can say the truth instead of "I don't know".
+            db.set_crawl_stats(
+                site_id, blocked=result.skipped_blocked, thin=result.skipped_thin
+            )
             slug = db.ensure_slug(site_id)
             row = db.get_site(site_id)
             publish(

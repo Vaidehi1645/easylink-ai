@@ -65,6 +65,12 @@ def run() -> int:
         check("intake header shows the robot logo artwork",
               page.locator(".logo img").count() == 1)
 
+        # --------------------------------------------- crawl cap hint (30 pages)
+        hint = page.locator(".hint")
+        check("crawl hint advertises the 30-page cap",
+              hint.count() == 1 and "max 30 pages" in hint.inner_text(),
+              hint.inner_text()[:70] if hint.count() else "missing")
+
         # --------------------------------------------- build (palmonas reuse: instant, free)
         page.fill("#url", "https://palmonas.com/")
         page.click("#go")

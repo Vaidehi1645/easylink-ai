@@ -187,6 +187,17 @@ class Database:
             # migration: shareable demo slugs (Phase 6)
             if "slug" not in cols:
                 self.conn.execute("ALTER TABLE sites ADD COLUMN slug TEXT")
+            # migration: crawl-reality stats — what FIGHTED the crawl (bot
+            # walls, JS-only bodies), so chat abstentions can tell the
+            # visitor WHY the bot is thin instead of a bare "I don't know".
+            if "blocked" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE sites ADD COLUMN blocked INTEGER DEFAULT 0"
+                )
+            if "thin" not in cols:
+                self.conn.execute(
+                    "ALTER TABLE sites ADD COLUMN thin INTEGER DEFAULT 0"
+                )
             # migration: gap dedupe/ranking (Phase 3)
             gap_cols = [r[1] for r in self.conn.execute("PRAGMA table_info(gaps)")]
             for col, decl in (
@@ -274,6 +285,18 @@ class Database:
         self._exec(
             "UPDATE sites SET page_count=?, chunk_count=? WHERE id=?",
             (pages, chunks, site_id),
+        )
+
+    def set_crawl_stats(self, site_id: str, blocked: int = 0, thin: int = 0) -> None:
+        """Persist what the SITE did to the crawl (403 walls, JS-only pages).
+
+        Kept on the row so a later chat abstention can say the truth —
+        "this site blocked 17 of our requests" — instead of a generic
+        "I don't know" that makes the bot (and the owner) look broken.
+        """
+        self._exec(
+            "UPDATE sites SET blocked=?, thin=? WHERE id=?",
+            (int(blocked), int(thin), site_id),
         )
 
     def list_sites(self) -> list[sqlite3.Row]:

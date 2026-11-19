@@ -109,6 +109,11 @@ def cmd_crawl(args) -> int:
           f"(store: {vs.backend})")
     pages, chunks = index_pages(site_id, result.pages, provider, db, vs, s)
     db.update_site_counts(site_id, pages, chunks)
+    # Same honesty as the web ingest: keep what fought the crawl on the row
+    # so the chatbot can say WHY it's thin instead of a bare "I don't know".
+    db.set_crawl_stats(
+        site_id, blocked=result.skipped_blocked, thin=result.skipped_thin
+    )
 
     print(f"\nDone: {pages} pages, {chunks} chunks  (site id: {site_id})")
     print("Chat with it:   python -m easylink chat")

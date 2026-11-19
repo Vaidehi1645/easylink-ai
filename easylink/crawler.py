@@ -444,6 +444,11 @@ def crawl_warning(pages: int, blocked: int, thin: int) -> str | None:
             "this site renders most of its content with JavaScript — the bot "
             "learned only what the site's HTML provides, so answers may be limited"
         )
+    if pages == 1:
+        return (
+            "this site has a single page — the bot learned all of it, so every "
+            "answer must come from that one page"
+        )
     return None
 
 

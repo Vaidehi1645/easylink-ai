@@ -627,6 +627,52 @@ def part1_offline() -> None:
           resolved is not None and resolved["id"] == site_new,
           f"got={resolved['id'] if resolved else None} expect={site_new}")
 
+    # --- honest abstain: the SITE's reality replaces a bare "I don't know"
+    #     A visitor seeing only "I don't know" blames the bot (and the owner
+    #     blames the storage) — a bot-wall or a one-page site must be said
+    #     out loud; healthy sites keep the exact ABSTAIN_TEXT.
+    cols = [r[1] for r in db.conn.execute("PRAGMA table_info(sites)")]
+    check("sites carries crawl-reality columns (blocked/thin)",
+          "blocked" in cols and "thin" in cols, f"cols={cols}")
+
+    healthy = db.create_site("https://fine.example", "FineCo")
+    db.update_site_counts(healthy, 12, 90)
+    db.set_crawl_stats(healthy, blocked=1, thin=0)
+    ans = engine2.answer("Do you ship to Mars?", healthy)
+    check("healthy site: exact ABSTAIN_TEXT (no noise)",
+          ans.abstained and ans.text == ABSTAIN_TEXT, f"'{ans.text[:60]}'")
+
+    onepage = db.create_site("https://onepage.example", "OnePage")
+    db.update_site_counts(onepage, 1, 4)
+    ans = engine2.answer("Do you ship to Mars?", onepage)
+    check("single-page site: abstain tells the reality first",
+          ans.abstained and ans.text.startswith("This site has only one page")
+          and "information on this website" in ans.text,
+          f"'{ans.text[:70]}'")
+
+    walled = db.create_site("https://walled.example", "Walled")
+    db.update_site_counts(walled, 4, 12)
+    db.set_crawl_stats(walled, blocked=17, thin=2)
+    ans = engine2.answer("Do you ship to Mars?", walled)
+    check("blocked-heavy site: abstain says it blocked us",
+          ans.abstained and "blocked 17" in ans.text, f"'{ans.text[:70]}'")
+
+    events = list(engine2.stream_answer("Do you ship to Mars?", walled))
+    final = [e for e in events if "answer" in e][0]["answer"]
+    check("stream path carries the reality note too",
+          final.abstained and "blocked 17" in final.text
+          and "blocked 17" in events[0].get("delta", ""),
+          f"'{final.text[:70]}'")
+
+    # --- layer-2 refusal on a limited site: the model's own words first,
+    #     then the site's limits (same suffix answer() appends).
+    onepage2 = db.create_site("https://l2page.example", "L2Page")
+    db.update_site_counts(onepage2, 1, 4)
+    ans = engine3.answer("REFUSE the visitor here", onepage2)
+    check("layer-2 refusal on a one-page site carries the reality",
+          ans.abstained and ans.text.startswith("I don't have that information")
+          and "one page" in ans.text, f"'{ans.text[:80]}'")
+
     db.conn.close()
 
 

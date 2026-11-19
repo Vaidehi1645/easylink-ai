@@ -311,6 +311,10 @@ check(
     "zero pages -> caller raises the hard error, no warn",
     crawler.crawl_warning(pages=0, blocked=30, thin=0) is None,
 )
+check(
+    "single-page crawl says so (honest, not silent)",
+    "single page" in (crawler.crawl_warning(pages=1, blocked=0, thin=0) or ""),
+)
 
 # --------------------------------------------------------------------------- #
 print("\n===== JS-heavy pages: stub rescue + seed guarantee =====")
