@@ -145,6 +145,23 @@ CREATE TABLE IF NOT EXISTS facts (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_facts_site ON facts(site_id);
+CREATE TABLE IF NOT EXISTS users (
+    id          TEXT PRIMARY KEY,
+    provider    TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    email       TEXT DEFAULT '',
+    name        TEXT DEFAULT '',
+    picture     TEXT DEFAULT '',
+    created_at  TEXT NOT NULL,
+    UNIQUE (provider, provider_id)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 """
 
 
@@ -578,6 +595,54 @@ class Database:
             "SELECT COUNT(*) AS n FROM facts WHERE site_id=?", (site_id,)
         )
         return int(rows[0]["n"])
+
+    # -- auth: owners + sessions ------------------------------------------
+    def upsert_user(
+        self, provider: str, provider_id: str, email: str, name: str, picture: str
+    ) -> str:
+        """Find or create the account for a provider identity; returns user id."""
+        with self.lock:
+            row = self._exec(
+                "SELECT id FROM users WHERE provider=? AND provider_id=?",
+                (provider, str(provider_id)),
+            ).fetchone()
+            if row:
+                user_id = str(row["id"])
+                self._exec(
+                    "UPDATE users SET email=?, name=?, picture=? WHERE id=?",
+                    (email or "", name or "", picture or "", user_id),
+                )
+                return user_id
+            user_id = uuid.uuid4().hex[:16]
+            self._exec(
+                "INSERT INTO users (id, provider, provider_id, email, name, picture, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (user_id, provider, str(provider_id), email or "", name or "",
+                 picture or "", now_iso()),
+            )
+            return user_id
+
+    def create_session(self, token_hash: str, user_id: str, days: int) -> None:
+        with self.lock:
+            self._exec(
+                "INSERT OR REPLACE INTO sessions (token_hash, user_id, created_at, expires_at) "
+                "VALUES (?,?,?,?)",
+                (token_hash, user_id, now_iso(),
+                 time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() + days * 86400))),
+            )
+
+    def session_user(self, token_hash: str) -> sqlite3.Row | None:
+        """The signed-in user for a session token, or None (missing/expired)."""
+        rows = self._rows(
+            "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+            "WHERE s.token_hash=? AND s.expires_at > ?",
+            (token_hash, now_iso()),
+        )
+        return rows[0] if rows else None
+
+    def delete_session(self, token_hash: str) -> None:
+        with self.lock:
+            self._exec("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
 
     # -- evals ------------------------------------------------------------
     def add_eval_run(self, site_id: str, total: int, ok: int, answered: int, abstained: int) -> None:

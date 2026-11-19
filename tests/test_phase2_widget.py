@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from easylink.store import Database  # noqa: E402
+from suite_session import COOKIE_NAME, owner_session  # noqa: E402
 
 # Override to test a second server instance:  $env:EL_TEST_BASE="http://127.0.0.1:8002"
 BASE = os.environ.get("EL_TEST_BASE", "http://127.0.0.1:8000")
@@ -35,6 +36,9 @@ def run() -> int:
     db = Database()
     site = db.get_site("Bookstore Test")
     token = db.get_or_create_token(site["id"])
+    # Owner login may be configured (.env) -> /test?token= is gated; sign
+    # the suite in so the widget demo opens with login ON or OFF.
+    owner_token = owner_session()
 
     shot_dir = Path(__file__).parent / "screenshots"
     shot_dir.mkdir(exist_ok=True)
@@ -42,6 +46,9 @@ def run() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1200, "height": 800})
+        page.context.add_cookies(
+            [{"name": COOKIE_NAME, "value": owner_token, "url": BASE}]
+        )
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)

@@ -12,17 +12,26 @@ Wraps the existing RAGEngine — zero new AI logic. Provides:
 from __future__ import annotations
 
 import dataclasses
+import hmac
 import json
 import queue
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 
 from api.security import Guard
+from easylink import auth as oauth
 from easylink.config import load_settings
 from easylink.crawler import crawl, crawl_warning, fetch_verdict
 from easylink.gaps import record_gap
@@ -221,21 +230,181 @@ def widget_js():
 def test_page(request: Request):
     token = request.query_params.get("token")
     if token:
+        blocked = _gate(request)
+        if blocked:
+            return blocked
         site = db.resolve_token(token)
         if site is None:
             return JSONResponse({"error": "invalid site token"}, status_code=401)
         return HTMLResponse(_demo_html(site))
     # No token -> the agent intake page (Phase 6): paste a link, watch the
-    # crawl, get a shareable /demo/<slug> link back.
+    # crawl, get a shareable /demo/<slug> link back. Intake stays public —
+    # the login modal there is a dismissible nudge, never a wall.
     return HTMLResponse((STATIC / "intake.html").read_text(encoding="utf-8"))
 
 
 @app.get("/demo/{slug}")
-def demo_page(slug: str):
+def demo_page(request: Request, slug: str):
+    blocked = _gate(request)
+    if blocked:
+        return blocked
     site = db.get_site_by_slug(slug)
     if site is None:
         return JSONResponse({"error": "no such demo — check the link"}, status_code=404)
     return HTMLResponse(_demo_html(site))
+
+
+# ------------------------------------------------------------- auth ---------
+# Owner sign-in (Google + GitHub). Everything here is feature-flagged: with
+# no client IDs in .env, `oauth.configured()` is empty and the app behaves
+# exactly as it did before the feature existed (no gates, no modal).
+def _session_user(request: Request):
+    """The signed-in owner from the session cookie (None = visitor)."""
+    tok = request.cookies.get(oauth.SESSION_COOKIE)
+    if not tok:
+        return None
+    return db.session_user(oauth.hash_token(tok))
+
+
+def _auth_on() -> bool:
+    return bool(oauth.configured(settings))
+
+
+def _redirect_uri(request: Request, provider: str) -> str:
+    """Where the provider sends the browser back.
+
+    EASYLINK_PUBLIC_URL (https://your-domain) wins — required once the app
+    sits behind a proxy that hides the real host. Google accepts plain
+    http://localhost for development, but demands HTTPS anywhere else.
+    """
+    base = settings.public_url or str(request.base_url).rstrip("/")
+    return f"{base}/auth/callback/{provider}"
+
+
+def _gate(request: Request) -> Response | None:
+    """Hard gate for demo pages: signed-in owners only.
+
+    Off entirely when login is unconfigured or EASYLINK_DEMO_GATE=false.
+    """
+    if not _auth_on() or not settings.demo_gate or _session_user(request):
+        return None
+    path = request.url.path
+    if request.url.query:
+        path += "?" + request.url.query
+    return RedirectResponse(
+        f"/auth/login?next={quote(path, safe='/')}", status_code=303
+    )
+
+
+@app.get("/auth/me")
+def auth_me(request: Request):
+    """What the pages need to render the modal/chip — never any secrets."""
+    user = _session_user(request)
+    return {
+        "providers": oauth.configured(settings),
+        "user": ({"name": user["name"], "picture": user["picture"]} if user else None),
+    }
+
+
+@app.get("/auth/login")
+def auth_login(request: Request, provider: str | None = None, next: str | None = None):
+    """The sign-in card (no provider) or the bounce to the provider."""
+    if not _auth_on():
+        return RedirectResponse("/test", status_code=303)
+    if provider is None:
+        return HTMLResponse(oauth.login_page(settings, oauth.safe_next(next)))
+    if provider not in oauth.configured(settings):
+        return JSONResponse(
+            {"error": "that sign-in method is not configured"}, status_code=400
+        )
+    state, nonce = oauth.new_state()
+    resp = RedirectResponse(
+        oauth.authorize_url(
+            provider, settings, _redirect_uri(request, provider), state, nonce
+        ),
+        status_code=302,
+    )
+    resp.set_cookie(
+        oauth.STATE_COOKIE,
+        oauth.state_cookie_value(state, nonce, oauth.safe_next(next)),
+        max_age=oauth.STATE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    return resp
+
+
+@app.get("/auth/callback/{provider}")
+def auth_callback(
+    request: Request,
+    provider: str,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    """Verify state -> exchange code -> verify token -> create the session."""
+
+    def fail(msg: str, status_code: int = 400) -> Response:
+        resp = JSONResponse({"error": msg}, status_code=status_code)
+        resp.delete_cookie(oauth.STATE_COOKIE)
+        return resp
+
+    if error:
+        return fail(f"sign-in was cancelled or refused ({error})")
+    raw = request.cookies.get(oauth.STATE_COOKIE)
+    if not raw or not state:
+        return fail("sign-in attempt expired — please try again")
+    try:
+        saved = json.loads(raw)
+    except (ValueError, TypeError):
+        return fail("sign-in attempt corrupted — please try again")
+    if not hmac.compare_digest(str(saved.get("state", "")), str(state)):
+        return fail("state mismatch — sign-in rejected (possible CSRF)", status_code=403)
+    if not code:
+        return fail("no authorization code was returned")
+    if provider not in oauth.configured(settings):
+        return fail("sign-in method not configured", status_code=400)
+    try:
+        tokens = oauth.exchange_code(
+            provider, settings, code, _redirect_uri(request, provider)
+        )
+        ident = oauth.identity(provider, settings, tokens, saved.get("nonce"))
+    except oauth.AuthError as exc:
+        return fail(str(exc), status_code=502)
+    if not ident.get("provider_id"):
+        return fail("the provider returned no account id", status_code=502)
+    user_id = db.upsert_user(
+        provider,
+        ident["provider_id"],
+        ident.get("email", ""),
+        ident.get("name", ""),
+        ident.get("picture", ""),
+    )
+    token = oauth.new_session_token()
+    db.create_session(oauth.hash_token(token), user_id, settings.session_days)
+    resp = RedirectResponse(oauth.safe_next(saved.get("next")), status_code=303)
+    resp.set_cookie(
+        oauth.SESSION_COOKIE,
+        token,
+        max_age=settings.session_days * 86400,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+    )
+    resp.delete_cookie(oauth.STATE_COOKIE)
+    return resp
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request):
+    """POST on purpose: a forged <img src=/auth/logout> must not sign you out."""
+    tok = request.cookies.get(oauth.SESSION_COOKIE)
+    if tok:
+        db.delete_session(oauth.hash_token(tok))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(oauth.SESSION_COOKIE)
+    return resp
 
 
 # ------------------------------------------------------------- ingest ------

@@ -189,6 +189,37 @@ snippet      <script src=".../widget.js" data-site="TOKEN"></script>
 - `GET /demo/<slug>` serves the demo page; slugs are domain-derived and
   stable (`jewelsmars.com` → `/demo/jewelsmars`, `…-2` on collision).
 
+## Owner sign-in (Google + GitHub OAuth)
+
+The intake page is the **owner console** — it gets a real login; visitors
+never need accounts.
+
+- **Feature-flagged:** with no client IDs in `.env`, login is off and the
+  app behaves exactly as before (no modal, no gates, tests unchanged).
+- **Intake (`/test`)** shows a **dismissible sign-in modal** on first visit
+  (Google + GitHub; click outside / × closes it) — crawling never requires
+  an account, and a **Sign in** link stays in the header for later.
+- **Demo pages** (`/demo/<slug>`, `/test?token=…`) are **gated**: visitors
+  bounce to a sign-in card and land back where they were after authenticating
+  (`EASYLINK_DEMO_GATE=false` opens them up). The **embeddable widget stays
+  public** — embeds are authenticated by the per-site token.
+- **Sessions:** 256-bit random token, only its SHA-256 hash stored in
+  SQLite, `HttpOnly` + `SameSite=Lax` cookie, 30-day expiry
+  (`EASYLINK_SESSION_DAYS`), logout revokes server-side (POST only — a
+  forged `<img src>` can't log you out).
+- **Security:** `state` cookie (CSRF) + `nonce` (replay) verified on the
+  callback; Google ID tokens checked against Google's published
+  certificates via `google-auth` (signature + audience + expiry — never
+  hand-parsed); client secrets only in `.env`; `next` restricted to local
+  paths (no open redirects); signed-in owners see avatar + **Sign out** in
+  the header.
+- **Setup:** create a Google OAuth client (redirect URI
+  `http://127.0.0.1:8000/auth/callback/google`) and a GitHub OAuth app
+  (callback `http://127.0.0.1:8000/auth/callback/github`), paste the four
+  values into `.env` (see `.env.example`), restart the server. Production
+  needs `EASYLINK_PUBLIC_URL=https://your-domain` — Google only accepts
+  HTTPS callbacks (localhost is the one exception).
+
 ## The 7 anti-hallucination layers (1–7 live in Phase 1)
 
 1. **Retrieval threshold** — below the similarity floor, it never even asks the model; auto "I don't know"

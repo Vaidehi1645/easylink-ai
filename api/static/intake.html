@@ -21,6 +21,58 @@
   .stage { width: 100%; max-width: 640px; text-align: center; }
   .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #4f46e5; text-decoration: none; }
   .logo:hover { text-decoration: underline; }
+  .toprow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #signinlink { font-size: 13px; font-weight: 600; color: #4f46e5; text-decoration: none; }
+  #signinlink:hover { text-decoration: underline; }
+  #signinlink[hidden] { display: none; }
+  .authchip {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: #fff; border: 1px solid #e6e8f0; border-radius: 999px;
+    padding: 3px 5px 3px 3px; font-size: 12.5px; color: #1f2430;
+    box-shadow: 0 3px 10px rgba(31,36,48,.08);
+  }
+  .authchip[hidden] { display: none; }
+  .authchip img { width: 24px; height: 24px; border-radius: 50%; background: #eef0ff; }
+  .authchip span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .authchip button {
+    background: #eef0ff; border: 0; color: #4f46e5; font: inherit; font-size: 12px;
+    font-weight: 600; cursor: pointer; padding: 4px 9px; border-radius: 999px;
+  }
+  .authchip button:hover { background: #dfe2ff; }
+
+  /* ---- first-visit sign-in modal (dismissible — it never blocks the crawl) ---- */
+  .lm-overlay {
+    position: fixed; inset: 0; background: rgba(20,22,43,.55); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  .lm-overlay[hidden] { display: none; }
+  .lm-card {
+    position: relative; width: 100%; max-width: 370px; background: #fff;
+    border-radius: 18px; padding: 30px 26px 24px; text-align: center;
+    box-shadow: 0 24px 60px rgba(20,22,43,.35);
+    animation: lmPop .18s ease-out;
+  }
+  @keyframes lmPop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .lm-x {
+    position: absolute; right: 10px; top: 8px; width: 32px; height: 32px;
+    border: 0; background: transparent; font-size: 22px; color: #8a90a3;
+    cursor: pointer; border-radius: 8px; line-height: 1;
+  }
+  .lm-x:hover { background: #f1f2f8; color: #1f2430; }
+  .lm-logo { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #4f46e5; }
+  .lm-card h2 { margin: 12px 0 4px; font-size: 20px; }
+  .lm-sub { margin: 0 0 18px; font-size: 13.5px; color: #8a90a3; }
+  .lm-btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 12px; margin: 9px 0; border-radius: 11px;
+    font-size: 14.5px; font-weight: 600; text-decoration: none; cursor: pointer;
+    border: 1.5px solid #d8dbe7; background: #fff; color: #1f2430;
+    font-family: inherit;
+  }
+  .lm-btn:hover { border-color: #4f46e5; }
+  .lm-btn.github { background: #14162b; border-color: #14162b; color: #fff; }
+  .lm-btn.github:hover { filter: brightness(1.15); }
+  .lm-fine { font-size: 12px; color: #8a90a3; margin: 14px 0 0; line-height: 1.6; }
   h1 { margin: 8px 0 22px; font-size: 30px; color: #1f2430; }
   h1 span { color: #4f46e5; }
 
@@ -122,7 +174,11 @@
 </head>
 <body>
 <div class="stage">
-  <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer">🔗 EasyLink AI</a>
+  <div class="toprow">
+    <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer">🔗 EasyLink AI</a>
+    <a id="signinlink" href="/auth/login" hidden>Sign in</a>
+    <div id="authchip" class="authchip" hidden></div>
+  </div>
   <h1>Turn any website into a <span>chatbot</span></h1>
 
   <section class="agent">
@@ -394,6 +450,72 @@
     go.textContent = "Build my bot";
   });
 })();
+</script>
+<div class="lm-overlay" id="loginmodal" hidden>
+  <div class="lm-card" role="dialog" aria-modal="true" aria-labelledby="lmtitle">
+    <button class="lm-x" id="lmclose" aria-label="Close">×</button>
+    <div class="lm-logo">🔗 EasyLink AI</div>
+    <h2 id="lmtitle">Sign in to EasyLink</h2>
+    <p class="lm-sub">Save your bots and see who views your demos — or just close this and keep exploring.</p>
+    <div id="lmbuttons"></div>
+    <p class="lm-fine">Signing in is optional here — you can paste a link and crawl right away.</p>
+  </div>
+</div>
+<script>
+  // ---- sign-in state: first-visit modal, header link, account chip ----
+  (function () {
+    var ICONS = {
+      google: '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.8-5H1.2v3.1C3.2 21.3 7.3 24 12 24z"/><path fill="#FBBC05" d="M5.2 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.2a12 12 0 0 0 0 10.8l4-3.1z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4C18 1.2 15.2 0 12 0 7.3 0 3.2 2.7 1.2 6.6l4 3.1c1-2.9 3.7-4.9 6.8-4.9z"/></svg>',
+      github: '<svg viewBox="0 0 16 16" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.2-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.5 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.2 0 3.1-1.9 3.8-3.6 4 .3.3.5.8.5 1.5v2.2c0 .2.1.5.5.4A8 8 0 0 0 16 8c0-4.4-3.6-8-8-8z"/></svg>'
+    };
+    var LABELS = { google: 'Continue with Google', github: 'Continue with GitHub' };
+    var modal = document.getElementById('loginmodal');
+    function show() { modal.hidden = false; }
+    function dismiss() {
+      modal.hidden = true;
+      try { localStorage.setItem('el_login_dismissed', '1'); } catch (e) {}
+    }
+    document.getElementById('lmclose').addEventListener('click', dismiss);
+    modal.addEventListener('click', function (e) { if (e.target === modal) dismiss(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) dismiss();
+    });
+
+    fetch('/auth/me').then(function (r) { return r.json(); }).then(function (a) {
+      var link = document.getElementById('signinlink');
+      var chip = document.getElementById('authchip');
+      if (a.user) {
+        var img = document.createElement('img');
+        if (a.user.picture) { img.src = a.user.picture; img.alt = ''; }
+        var nm = document.createElement('span');
+        nm.textContent = a.user.name || 'Signed in';
+        var out = document.createElement('button');
+        out.type = 'button';
+        out.textContent = 'Sign out';
+        out.addEventListener('click', function () {
+          fetch('/auth/logout', { method: 'POST' }).then(function () { location.reload(); });
+        });
+        chip.append(img, nm, out);
+        chip.hidden = false;
+        return;
+      }
+      if (!a.providers || !a.providers.length) return; // login not configured
+      var box = document.getElementById('lmbuttons');
+      a.providers.forEach(function (p) {
+        var btn = document.createElement('a');
+        btn.className = 'lm-btn' + (p === 'github' ? ' github' : '');
+        btn.href = '/auth/login?provider=' + p + '&next=/test';
+        btn.innerHTML = ICONS[p] || '';
+        btn.appendChild(document.createTextNode(LABELS[p] || p));
+        box.appendChild(btn);
+      });
+      link.hidden = false;
+      link.addEventListener('click', function (e) { e.preventDefault(); show(); });
+      var seen = null;
+      try { seen = localStorage.getItem('el_login_dismissed'); } catch (e) {}
+      if (!seen) show();
+    }).catch(function () {});
+  })();
 </script>
 </body>
 </html>

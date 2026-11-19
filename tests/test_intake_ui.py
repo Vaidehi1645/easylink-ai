@@ -38,6 +38,11 @@ def run() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(viewport={"width": 1200, "height": 800})
+        # Owner login may be configured (.env): the first-visit sign-in modal
+        # must not cover the crawl controls this suite clicks through.
+        context.add_init_script(
+            "try { localStorage.setItem('el_login_dismissed', '1'); } catch (e) {}"
+        )
         page = context.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))

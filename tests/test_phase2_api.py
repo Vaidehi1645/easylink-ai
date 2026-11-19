@@ -18,10 +18,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from easylink.store import Database  # noqa: E402
+from suite_session import COOKIE_NAME, owner_session  # noqa: E402
 
 # Override to test a second server instance:  $env:EL_TEST_BASE="http://127.0.0.1:8002"
 BASE = os.environ.get("EL_TEST_BASE", "http://127.0.0.1:8000")
 RESULTS: list[tuple[str, bool, str]] = []
+
+# Suites must pass whether or not owner login is configured: carry a valid
+# session so the gated demo views open (ignored when login is off).
+OWNER_TOKEN = owner_session()
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -35,7 +40,8 @@ def req(path, data=None, headers=None, method=None, base=BASE, timeout=120):
     r = urllib.request.Request(
         base + path,
         data=body,
-        headers={"Content-Type": "application/json", **(headers or {})},
+        headers={"Content-Type": "application/json",
+                 "Cookie": f"{COOKIE_NAME}={OWNER_TOKEN}", **(headers or {})},
         method=method or ("POST" if data is not None else "GET"),
     )
     try:

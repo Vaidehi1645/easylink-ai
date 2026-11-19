@@ -15,7 +15,21 @@
     line-height: 1.55;
   }
   header { background: #4f46e5; color: #fff; padding: 30px 20px 26px; }
-  .wrap { max-width: 760px; margin: 0 auto; }
+  .wrap { max-width: 760px; margin: 0 auto; position: relative; }
+  .authchip {
+    position: absolute; right: 0; top: 0;
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28);
+    border-radius: 999px; padding: 4px 6px 4px 4px; font-size: 13px;
+  }
+  .authchip[hidden] { display: none; }
+  .authchip img { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.25); }
+  .authchip span { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .authchip button {
+    background: rgba(255,255,255,.16); border: 0; color: #fff; font: inherit;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 5px 10px; border-radius: 999px;
+  }
+  .authchip button:hover { background: rgba(255,255,255,.28); }
   .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; color: inherit; text-decoration: none; }
   .logo:hover { opacity: 1; }
   h1 { margin: 6px 0 4px; font-size: 30px; }
@@ -46,6 +60,7 @@
 <header>
   <div class="wrap">
     <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer">🔗 EasyLink AI</a>
+    <div id="authchip" class="authchip" hidden></div>
     <h1>Live Demo</h1>
     <div class="sub">Grounded answers about <strong>__SITE__</strong> — streamed live, every claim linked to its source.</div>
     <div class="note">__NOTE__</div>
@@ -122,6 +137,25 @@
     }
     render();
   })();
+</script>
+<script>
+  // ---- account chip: who is signed in (from /auth/me — never any secrets) ----
+  fetch('/auth/me').then(r => r.json()).then(a => {
+    if (!a.user) return;
+    const box = document.getElementById('authchip');
+    const img = document.createElement('img');
+    if (a.user.picture) { img.src = a.user.picture; img.alt = ''; }
+    const nm = document.createElement('span');
+    nm.textContent = a.user.name || 'Signed in';
+    const out = document.createElement('button');
+    out.type = 'button';
+    out.textContent = 'Sign out';
+    out.addEventListener('click', () => {
+      fetch('/auth/logout', { method: 'POST' }).then(() => location.reload());
+    });
+    box.append(img, nm, out);
+    box.hidden = false;
+  }).catch(() => {});
 </script>
 </body>
 </html>

@@ -26,9 +26,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from suite_session import COOKIE_NAME, owner_session  # noqa: E402
+
 # Override to test a second server instance:  $env:EL_TEST_BASE="http://127.0.0.1:8002"
 BASE = os.environ.get("EL_TEST_BASE", "http://127.0.0.1:8000")
 RESULTS: list[tuple[str, bool, str]] = []
+
+# Owner login may be configured (.env) -> demo views are gated; carry a
+# valid session so this suite passes with login on OR off.
+OWNER_TOKEN = owner_session()
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -42,7 +48,8 @@ def req(path, data=None, method=None, base=BASE, timeout=60):
     r = urllib.request.Request(
         base + path,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json",
+                 "Cookie": f"{COOKIE_NAME}={OWNER_TOKEN}"},
         method=method or ("POST" if data is not None else "GET"),
     )
     try:

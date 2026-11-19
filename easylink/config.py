@@ -72,6 +72,15 @@ class Settings:
     chunk_chars: int = 1600
     chunk_overlap: int = 200
 
+    # --- auth (Google + GitHub sign-in; empty IDs = login off entirely) ---
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    public_url: str = ""       # "" -> derive from the request (dev: localhost)
+    session_days: int = 30     # owner console session lifetime
+    demo_gate: bool = True     # demo pages require sign-in when login is on
+
     # --- misc ---
     never_say: list[str] = field(default_factory=list)
 
@@ -118,6 +127,18 @@ def load_settings() -> Settings:
         s.max_pages = int(v)
     if v := _get("EASYLINK_TEMPERATURE"):
         s.temperature = float(v)
+
+    # Owner sign-in (Google + GitHub OAuth). Missing IDs = login stays off,
+    # so the app behaves exactly as it did before the feature existed.
+    s.google_client_id = _get("GOOGLE_CLIENT_ID", "")
+    s.google_client_secret = _get("GOOGLE_CLIENT_SECRET", "")
+    s.github_client_id = _get("GITHUB_CLIENT_ID", "")
+    s.github_client_secret = _get("GITHUB_CLIENT_SECRET", "")
+    s.public_url = _get("EASYLINK_PUBLIC_URL", "").rstrip("/")
+    if v := _get("EASYLINK_SESSION_DAYS"):
+        s.session_days = max(1, int(v))
+    if v := _get("EASYLINK_DEMO_GATE"):
+        s.demo_gate = v.strip().lower() not in ("0", "false", "no", "off")
 
     # Owner-defined "never say" list (layer 5 of the anti-hallucination stack)
     if NEVER_SAY_PATH.exists():
