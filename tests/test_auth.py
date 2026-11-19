@@ -39,6 +39,9 @@ server.settings.google_client_id = "utest-google-id.apps.googleusercontent.com"
 server.settings.google_client_secret = "utest-google-secret"
 server.settings.github_client_id = "utest-github-id"
 server.settings.github_client_secret = "utest-github-secret"
+# .env may set EASYLINK_DEMO_GATE=false for local browsing; these checks
+# exist to prove the gate WORKS, so force it on for this suite.
+server.settings.demo_gate = True
 
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -125,6 +128,11 @@ def main() -> int:
         and "provider=google" in html
         and "provider=github" in html,
         str(r.status_code),
+    )
+    check(
+        "login card shows the robot logo + favicon link",
+        'src="/logo.png"' in html and 'rel="icon"' in html,
+        "",
     )
 
     r = c.get("/auth/login?next=https://evil.example.com")

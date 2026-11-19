@@ -62,6 +62,8 @@ def run() -> int:
         href = page.locator(".logo").get_attribute("href") or ""
         check("intake logo links to GitHub", "github.com/Vaidehi1645" in href,
               href or "no href")
+        check("intake header shows the robot logo artwork",
+              page.locator(".logo img").count() == 1)
 
         # --------------------------------------------- build (palmonas reuse: instant, free)
         page.fill("#url", "https://palmonas.com/")

@@ -167,6 +167,12 @@ def main() -> int:
     check("GET /widget.js -> 200 + shadow DOM code",
           code == 200 and "attachShadow" in raw and "data-site" in raw, f"{len(raw)} bytes")
 
+    # -------------------------------------------------------------- brand
+    code, _, hdrs = req("/logo.png")
+    check("GET /logo.png -> 200 + image/png",
+          code == 200 and (get_h(hdrs, "content-type") or "").startswith("image/png"),
+          f"{code} {get_h(hdrs, 'content-type')}")
+
     # ---------------------------------------------------------- demo page
     code, raw, _ = req(f"/test?token={token}")
     check("GET /test?token -> 200 + how-it-works + token",
@@ -175,6 +181,8 @@ def main() -> int:
           'href="https://github.com/Vaidehi1645"' in raw)
     check("demo carries the 'What this bot learned' payload",
           "What this bot learned" in raw and "window.LEARNED_TITLES =" in raw)
+    check("demo page declares the robot favicon",
+          'rel="icon"' in raw and 'href="/logo.png"' in raw)
 
     # ------------------------------------------------------- auth: bad token
     code, raw, _ = req("/chat", {"token": "deadbeef" * 4, "question": "hi"})

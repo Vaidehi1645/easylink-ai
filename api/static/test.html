@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EasyLink AI — Live Demo</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>
   /* ===================== clean demo styling ===================== */
   * { box-sizing: border-box; }
@@ -30,8 +32,9 @@
     font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 5px 10px; border-radius: 999px;
   }
   .authchip button:hover { background: rgba(255,255,255,.28); }
-  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; color: inherit; text-decoration: none; }
+  .logo { display: block; font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .85; color: inherit; text-decoration: none; }
   .logo:hover { opacity: 1; }
+  .logo img { height: 40px; width: auto; border-radius: 9px; }
   h1 { margin: 6px 0 4px; font-size: 30px; }
   .sub { opacity: .92; font-size: 15px; }
   .note { font-size: 12.5px; color: #8a90a3; margin-top: 7px; }
@@ -59,7 +62,7 @@
 
 <header>
   <div class="wrap">
-    <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer">🔗 EasyLink AI</a>
+    <a class="logo" href="https://github.com/Vaidehi1645" target="_blank" rel="noopener noreferrer"><img src="/logo.png" alt="EasyLink AI"></a>
     <div id="authchip" class="authchip" hidden></div>
     <h1>Live Demo</h1>
     <div class="sub">Grounded answers about <strong>__SITE__</strong> — streamed live, every claim linked to its source.</div>

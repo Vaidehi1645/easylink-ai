@@ -226,6 +226,21 @@ def widget_js():
     return FileResponse(STATIC / "widget.js", media_type="application/javascript")
 
 
+# --------------------------------------------------------------- brand ------
+@app.get("/logo.png")
+def logo_png():
+    """The EasyLink robot artwork: header logo on every page + the favicon."""
+    if not (STATIC / "logo.png").exists():
+        return HTMLResponse("logo not installed", status_code=404)
+    return FileResponse(STATIC / "logo.png", media_type="image/png")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    # Browsers that ignore <link rel="icon"> still ask for this; same art.
+    return logo_png()
+
+
 @app.get("/test")
 def test_page(request: Request):
     token = request.query_params.get("token")

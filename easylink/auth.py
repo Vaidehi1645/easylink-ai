@@ -231,6 +231,8 @@ _PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in — EasyLink AI</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -244,7 +246,8 @@ _PAGE = """<!doctype html>
     border-radius: 18px; padding: 30px 26px 26px; text-align: center;
     box-shadow: 0 18px 45px rgba(31,36,48,.12);
   }
-  .logo { font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #4f46e5; text-decoration: none; }
+  .logo { display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #4f46e5; text-decoration: none; }
+  .logo img { height: 68px; width: auto; border-radius: 14px; }
   h1 { font-size: 21px; margin: 14px 0 4px; }
   .sub { color: #8a90a3; font-size: 13.5px; margin: 0 0 20px; }
   .btn {
@@ -263,7 +266,7 @@ _PAGE = """<!doctype html>
 </head>
 <body>
   <div class="card">
-    <a class="logo" href="/test">&#128279; EasyLink AI</a>
+    <a class="logo" href="/test"><img src="/logo.png" alt="EasyLink AI"></a>
     <h1>Sign in to continue</h1>
     <p class="sub">One click — we only ever ask for your name and e-mail.</p>
 __BUTTONS__
